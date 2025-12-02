@@ -99,6 +99,7 @@ curl http://localhost:8001/health
 ### System Overview
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e1f5fe', 'background': '#ffffff', 'primaryTextColor': '#01579b', 'lineColor': '#01579b' }}}%%
 flowchart TB
     subgraph Client["🌐 Client"]
         C[HTTP Request]
@@ -144,6 +145,7 @@ flowchart TB
 ### Request Flow
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'background': '#ffffff', 'primaryTextColor': '#333333', 'lineColor': '#666666' }}}%%
 sequenceDiagram
     autonumber
     participant C as 🌐 Client
@@ -181,6 +183,7 @@ sequenceDiagram
 ### Email State Machine
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'background': '#ffffff', 'primaryTextColor': '#333333', 'lineColor': '#666666' }}}%%
 stateDiagram-v2
     [*] --> pending: Email Created
 
@@ -204,6 +207,7 @@ stateDiagram-v2
 ### Container Architecture
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'background': '#ffffff', 'primaryTextColor': '#333333', 'lineColor': '#666666' }}}%%
 flowchart LR
     subgraph Docker["🐳 Docker Network"]
         direction TB
@@ -442,6 +446,7 @@ FOR UPDATE SKIP LOCKED;
 ## Retry Logic
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'background': '#ffffff', 'primaryTextColor': '#333333', 'lineColor': '#666666' }}}%%
 flowchart TD
     A[Email Failed] --> B{Retry Count < Max?}
     B -->|Yes| C[Calculate Backoff]
@@ -694,6 +699,7 @@ docker logs email-service-worker 2>&1 | grep "otp_verification"
 #### State Transitions
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'background': '#ffffff', 'primaryTextColor': '#333333', 'lineColor': '#666666' }}}%%
 stateDiagram-v2
     direction LR
 
@@ -763,6 +769,7 @@ SELECT id, status, retry_count, sent_at FROM email_queue WHERE id = 26;
 #### State Transitions
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'background': '#ffffff', 'primaryTextColor': '#333333', 'lineColor': '#666666' }}}%%
 stateDiagram-v2
     direction LR
 
