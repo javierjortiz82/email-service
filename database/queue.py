@@ -136,11 +136,16 @@ class EmailQueueManager:
             raise EmailQueueError(f"Connection pool initialization failed: {e}") from e
 
     def _init_pool(self) -> None:
-        """Initialize PostgreSQL connection pool."""
-        logger.debug("Initializing PostgreSQL connection pool...")
+        """Initialize PostgreSQL connection pool with configurable size."""
+        min_conn = getattr(self.config, "DB_POOL_SIZE_MIN", 1)
+        max_conn = getattr(self.config, "DB_POOL_SIZE_MAX", 10)
+
+        logger.debug(
+            f"Initializing PostgreSQL connection pool (min={min_conn}, max={max_conn})..."
+        )
         self._pool = pool.SimpleConnectionPool(
-            minconn=1,
-            maxconn=10,
+            minconn=min_conn,
+            maxconn=max_conn,
             dsn=self.config.DATABASE_URL,
             cursor_factory=RealDictCursor,
         )

@@ -177,6 +177,28 @@ class EmailConfig(BaseSettings):
         le=86400,
         description="Initial backoff duration in seconds",
     )
+    EMAIL_WORKER_CONCURRENCY: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Max concurrent email sends per batch",
+    )
+
+    # ========================================================================
+    # Database Pool Configuration
+    # ========================================================================
+    DB_POOL_SIZE_MIN: int = Field(
+        default=1,
+        ge=1,
+        le=20,
+        description="Minimum database connections in pool",
+    )
+    DB_POOL_SIZE_MAX: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Maximum database connections in pool",
+    )
 
     # ========================================================================
     # Reminder Configuration

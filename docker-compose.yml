@@ -22,6 +22,8 @@ services:
       # Database
       - DATABASE_URL=postgresql://${POSTGRES_USER:-mcp_user}:${POSTGRES_PASSWORD:-mcp_password}@mcp-postgres:5432/${POSTGRES_DB:-mcpdb}
       - SCHEMA_NAME=${SCHEMA_NAME:-test}
+      - DB_POOL_SIZE_MIN=${DB_POOL_SIZE_MIN:-1}
+      - DB_POOL_SIZE_MAX=${DB_POOL_SIZE_MAX:-10}
       # SMTP
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT:-587}
@@ -67,6 +69,8 @@ services:
       # Database
       - DATABASE_URL=postgresql://${POSTGRES_USER:-mcp_user}:${POSTGRES_PASSWORD:-mcp_password}@mcp-postgres:5432/${POSTGRES_DB:-mcpdb}
       - SCHEMA_NAME=${SCHEMA_NAME:-test}
+      - DB_POOL_SIZE_MIN=${DB_POOL_SIZE_MIN:-1}
+      - DB_POOL_SIZE_MAX=${DB_POOL_SIZE_MAX:-10}
       # SMTP
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT:-587}
@@ -78,6 +82,7 @@ services:
       # Worker
       - EMAIL_WORKER_POLL_INTERVAL=${EMAIL_WORKER_POLL_INTERVAL:-10}
       - EMAIL_WORKER_BATCH_SIZE=${EMAIL_WORKER_BATCH_SIZE:-50}
+      - EMAIL_WORKER_CONCURRENCY=${EMAIL_WORKER_CONCURRENCY:-5}
       - EMAIL_RETRY_MAX_ATTEMPTS=${EMAIL_RETRY_MAX_ATTEMPTS:-3}
       - EMAIL_RETRY_BACKOFF_SECONDS=${EMAIL_RETRY_BACKOFF_SECONDS:-300}
       # Logging

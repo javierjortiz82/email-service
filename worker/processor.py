@@ -30,6 +30,7 @@ class EmailWorker:
 
     Continuously polls the queue and delivers emails via SMTP.
     Handles graceful shutdown on SIGTERM/SIGINT with proper cleanup.
+    Supports concurrent email processing with configurable parallelism.
     """
 
     def __init__(self) -> None:
@@ -73,6 +74,10 @@ class EmailWorker:
             self.processed_count = 0
             self.failed_count = 0
 
+            # Concurrency control - limit parallel email sends
+            self._concurrency = getattr(self.config, "EMAIL_WORKER_CONCURRENCY", 5)
+            self._semaphore = asyncio.Semaphore(self._concurrency)
+
             signal.signal(signal.SIGTERM, self._handle_shutdown)
             signal.signal(signal.SIGINT, self._handle_shutdown)
 
@@ -95,6 +100,7 @@ class EmailWorker:
             f"Worker Configuration: "
             f"poll_interval={self.config.EMAIL_WORKER_POLL_INTERVAL}s | "
             f"batch_size={self.config.EMAIL_WORKER_BATCH_SIZE} | "
+            f"concurrency={self._concurrency} | "
             f"max_retries={self.config.EMAIL_RETRY_MAX_ATTEMPTS} | "
             f"retry_backoff={self.config.EMAIL_RETRY_BACKOFF_SECONDS}s"
         )
@@ -117,7 +123,7 @@ class EmailWorker:
         logger.info("=" * 80)
 
     async def _process_batch(self) -> None:
-        """Process a batch of pending emails from queue."""
+        """Process a batch of pending emails from queue concurrently."""
         try:
             pending_emails = self.queue_manager.get_pending_emails(
                 limit=self.config.EMAIL_WORKER_BATCH_SIZE
@@ -127,18 +133,36 @@ class EmailWorker:
                 logger.debug("No pending emails in queue")
                 return
 
-            logger.info(f"Processing {len(pending_emails)} pending emails...")
+            logger.info(
+                f"Processing {len(pending_emails)} pending emails "
+                f"(concurrency={self._concurrency})..."
+            )
 
-            for email in pending_emails:
-                try:
-                    await self._process_email(email)
-                    self.processed_count += 1
-                except Exception as e:
-                    logger.error(f"Error processing email {email.id}: {e}", exc_info=True)
+            # Process emails concurrently with semaphore-limited parallelism
+            tasks = [
+                self._process_email_with_semaphore(email)
+                for email in pending_emails
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Count successes and failures
+            for result in results:
+                if isinstance(result, Exception):
                     self.failed_count += 1
+                else:
+                    self.processed_count += 1
 
         except Exception as e:
             logger.error(f"Batch processing error: {e}", exc_info=True)
+
+    async def _process_email_with_semaphore(self, email: EmailRecord) -> None:
+        """Process email with concurrency limiting via semaphore."""
+        async with self._semaphore:
+            try:
+                await self._process_email(email)
+            except Exception as e:
+                logger.error(f"Error processing email {email.id}: {e}", exc_info=True)
+                raise
 
     async def _process_email(self, email: EmailRecord) -> None:
         """Process a single email record."""
