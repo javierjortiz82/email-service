@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="x-apple-disable-message-reformatting">
+    <title>Verifica tu correo electrónico - Demo Chat</title>
+    <style type="text/css">
+        /* Reset & Base Styles */
+        body, table, td, div, p, a {
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
+        }
+        table, td {
+            mso-table-lspace: 0;
+            mso-table-rspace: 0;
+        }
+        img {
+            -ms-interpolation-mode: nearest-neighbor;
+            border: 0;
+            outline: none;
+            text-decoration: none;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            min-width: 100% !important;
+            background-color: #f7fafc;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #2d3748;
+        }
+
+        /* Responsive Media Query */
+        @media only screen and (max-width: 600px) {
+            .container {
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+            .header {
+                padding: 32px 20px !important;
+            }
+            .header h1 {
+                font-size: 28px !important;
+            }
+            .content {
+                padding: 28px 20px !important;
+            }
+            .otp-code {
+                font-size: 36px !important;
+                padding: 20px !important;
+            }
+            .footer {
+                padding: 24px 20px !important;
+            }
+        }
+    </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f7fafc;">
+    <!-- Wrapper MSOS para Outlook -->
+    <!--[if mso]>
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f7fafc;">
+    <tr>
+    <td>
+    <![endif]-->
+
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; max-width: 100%; background-color: #f7fafc;">
+        <tr>
+            <td style="padding: 16px 0;">
+                <!-- Container Principal -->
+                <!--[if mso]>
+                <table width="600" cellpadding="0" cellspacing="0" style="border-collapse: collapse; margin: 0 auto;">
+                <tr>
+                <td>
+                <![endif]-->
+
+                <table class="container" role="presentation" width="600" cellpadding="0" cellspacing="0" style="width: 600px; max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); border-collapse: collapse;">
+                    <!-- Header -->
+                    <tr>
+                        <td class="header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); background-color: #667eea; padding: 40px 24px; text-align: center;">
+                            <h1 style="margin: 0; font-size: 32px; font-weight: 700; line-height: 1.2; color: #ffffff;">🔐 Verifica tu Correo</h1>
+                        </td>
+                    </tr>
+
+                    <!-- Content -->
+                    <tr>
+                        <td class="content" style="padding: 40px 28px; color: #2d3748;">
+                            <p style="margin: 16px 0; font-size: 15px; line-height: 1.8; color: #2d3748;">Hola <strong style="font-weight: 600;">{{ recipient_name }}</strong>,</p>
+
+                            <p style="margin: 16px 0; font-size: 15px; line-height: 1.8; color: #2d3748;">Gracias por registrarte en Demo Chat. Para verificar tu cuenta, utiliza el siguiente código:</p>
+
+                            <!-- OTP Code Box -->
+                            <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #f8f9fa; border: 2px dashed #667eea; padding: 32px; margin: 28px 0; border-radius: 8px; border-collapse: collapse; text-align: center;">
+                                <tr>
+                                    <td style="padding: 0;">
+                                        <p style="margin: 0 0 12px 0; color: #4a5568; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Código de Verificación</p>
+                                        <div class="otp-code" style="font-size: 48px; font-weight: 700; color: #667eea; letter-spacing: 8px; font-family: 'Courier New', monospace; padding: 24px 0;">{{ otp_code }}</div>
+                                        <p style="margin: 12px 0 0 0; color: #718096; font-size: 13px;">Este código expira en 24 horas</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Security Notice -->
+                            <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%; background-color: #fff5f5; border-left: 5px solid #fc8181; padding: 20px; margin: 28px 0; border-radius: 8px; border-collapse: collapse;">
+                                <tr>
+                                    <td style="padding: 0;">
+                                        <h3 style="margin: 0 0 12px 0; color: #c53030; font-size: 16px; font-weight: 700;">⚠️ Aviso de Seguridad</h3>
+                                        <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #742a2a;">
+                                            <strong>Nunca compartas este código</strong> con nadie. Nuestro equipo nunca te pedirá este código por teléfono, correo electrónico o redes sociales.
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <p style="margin: 16px 0; font-size: 15px; line-height: 1.8; color: #2d3748;">Si no creaste una cuenta, puedes ignorar este correo de forma segura.</p>
+
+                            <p style="margin: 16px 0; font-size: 15px; line-height: 1.8; color: #2d3748;">¡Bienvenido a bordo! 🎉</p>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td class="footer" style="background-color: #f8f9fa; padding: 28px 24px; text-align: center; border-top: 1px solid #e9ecef;">
+                            <p style="margin: 8px 0; font-size: 13px; color: #718096; line-height: 1.6;"><strong style="color: #4a5568; font-weight: 600;">{{ company_name | default('Email Service') }}</strong></p>
+                            <p style="margin: 8px 0; font-size: 13px; color: #718096; line-height: 1.6;">Impulsado por tecnología de inteligencia artificial</p>
+                            <p style="margin: 8px 0; font-size: 13px; color: #718096; line-height: 1.6;">
+                                <a href="#" style="color: #667eea; text-decoration: none; font-weight: 500;">Política de Privacidad</a> | <a href="#" style="color: #667eea; text-decoration: none; font-weight: 500;">Términos de Servicio</a>
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+
+                <!--[if mso]>
+                </td>
+                </tr>
+                </table>
+                <![endif]-->
+            </td>
+        </tr>
+    </table>
+
+    <!--[if mso]>
+    </td>
+    </tr>
+    </table>
+    <![endif]-->
+</body>
+</html>

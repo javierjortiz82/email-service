@@ -1,0 +1,36 @@
+# ============================================================================
+# Email Service - Python Dependencies
+# ============================================================================
+# Installation: pip install -r requirements.txt
+# ============================================================================
+
+# Core Dependencies
+pydantic[email]>=2.11.0
+pydantic-settings>=2.6.0
+psycopg2-binary>=2.9.10
+jinja2>=3.1.0
+python-dotenv>=1.0.0
+
+# API Dependencies
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# ============================================================================
+# Development Dependencies
+# ============================================================================
+
+# Testing
+pytest>=8.3.0
+pytest-cov>=4.1.0
+
+# Type Checking
+mypy>=1.13.0
+types-psycopg2
+
+# Code Quality (ruff replaces flake8, isort, and more)
+black>=24.0.0
+ruff>=0.8.0
+bandit>=1.7.0
+
+# Development Tools
+pre-commit>=3.0
