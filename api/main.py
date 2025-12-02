@@ -99,20 +99,35 @@ async def send_email(request: EmailRequest) -> EmailResponse:
             detail="Service not initialized",
         )
 
+    # Map template_id to EmailType
+    template_type_map = {
+        "otp_verification": EmailType.OTP_VERIFICATION,
+        "booking_created": EmailType.BOOKING_CREATED,
+        "booking_cancelled": EmailType.BOOKING_CANCELLED,
+        "booking_rescheduled": EmailType.BOOKING_RESCHEDULED,
+        "reminder_24h": EmailType.REMINDER_24H,
+        "reminder_1h": EmailType.REMINDER_1H,
+    }
+
     try:
         message_id = request.client_message_id or str(uuid.uuid4())
 
+        # Determine email type based on template_id
+        email_type = EmailType.TRANSACTIONAL
+        if request.template_id:
+            email_type = template_type_map.get(request.template_id, EmailType.TRANSACTIONAL)
+
         for recipient in request.to:
             queue_manager.enqueue_email(
-                email_type=EmailType.TRANSACTIONAL,
+                email_type=email_type,
                 recipient_email=recipient,
-                recipient_name=None,
+                recipient_name=request.template_vars.get("recipient_name") if request.template_vars else None,
                 subject=request.subject,
                 body_html=request.body,
                 template_context=request.template_vars if request.template_id else None,
             )
 
-        logger.info(f"Email queued: {message_id} to {len(request.to)} recipients")
+        logger.info(f"Email queued: {message_id} to {len(request.to)} recipients (type={email_type.value})")
 
         return EmailResponse(
             status="accepted",

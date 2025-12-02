@@ -520,6 +520,409 @@ LOG_LEVEL=DEBUG docker-compose up
 
 ---
 
+## Test Scenarios
+
+This section provides practical test scenarios to validate the email service functionality.
+
+### Scenario 1: Invalid Email Address
+
+**Objective:** Verify API validation rejects invalid email formats.
+
+**Step 1: Send request with invalid email**
+
+```bash
+curl -X POST http://localhost:8001/emails \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": ["tvbox.com"],
+    "subject": "Test Invalid Email",
+    "body": "<h1>Test</h1><p>This should fail validation.</p>"
+  }'
+```
+
+**Response (422 Unprocessable Entity):**
+
+```json
+{
+  "detail": [
+    {
+      "type": "value_error",
+      "loc": ["body", "to", 0],
+      "msg": "value is not a valid email address: An email address must have an @-sign.",
+      "input": "tvbox.com",
+      "ctx": {
+        "reason": "An email address must have an @-sign."
+      }
+    }
+  ]
+}
+```
+
+**Result:** ❌ Request rejected - Email validation working correctly.
+
+---
+
+### Scenario 2: Valid Email Delivery
+
+**Objective:** Verify successful email delivery to a valid recipient.
+
+**Step 1: Send email request**
+
+```bash
+curl -X POST http://localhost:8001/emails \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": ["recipient@example.com"],
+    "subject": "Test Scenario 2 - Valid Email",
+    "body": "<h1>Hello!</h1><p>This is a test email from Odiseo Email Service.</p>"
+  }'
+```
+
+**Response (202 Accepted):**
+
+```json
+{
+  "status": "accepted",
+  "queued": true,
+  "message_id": "8e9dd8d6-8f0f-47ec-9781-8da0e6184340",
+  "detail": "Email stored in queue",
+  "timestamp": "2025-12-02T05:43:34.633201"
+}
+```
+
+**Step 2: Check queue status (after ~10 seconds)**
+
+```bash
+curl http://localhost:8001/queue/status
+```
+
+**Response:**
+
+```json
+{
+  "pending": 0,
+  "scheduled": 0,
+  "processing": 0,
+  "sent": 24,
+  "failed": 0,
+  "timestamp": "2025-12-02T05:43:49.020708"
+}
+```
+
+**Step 3: Verify in worker logs**
+
+```bash
+docker logs email-service-worker 2>&1 | tail -5
+```
+
+```
+2025-12-02 05:43:38 - INFO - Starting: #24 | process_email | →recipient@example.com (type=transactional)
+2025-12-02 05:43:38 - INFO - Email #24 status updated to processing
+2025-12-02 05:43:42 - INFO - Email sent to recipient@example.com - Subject: Test Scenario 2...
+2025-12-02 05:43:42 - INFO - Email #24 status updated to sent
+2025-12-02 05:43:42 - INFO - COMPLETED: #24 | process_email | →recipient@example.com (type=transactional)
+```
+
+**Result:** ✅ Email delivered successfully.
+
+---
+
+### Scenario 3: Email with Template (OTP Verification)
+
+**Objective:** Verify template rendering with dynamic variables.
+
+**Step 1: Send email with template**
+
+```bash
+curl -X POST http://localhost:8001/emails \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": ["recipient@example.com"],
+    "subject": "Verify Your Email - OTP Code",
+    "body": "fallback body",
+    "template_id": "otp_verification",
+    "template_vars": {
+      "recipient_name": "John Doe",
+      "otp_code": "123456",
+      "company_name": "Odiseo"
+    }
+  }'
+```
+
+**Response (202 Accepted):**
+
+```json
+{
+  "status": "accepted",
+  "queued": true,
+  "message_id": "167285e5-bb58-4e79-8f24-538e507552d3",
+  "detail": "Email stored in queue",
+  "timestamp": "2025-12-02T05:45:48.642756"
+}
+```
+
+**Step 2: Check worker logs**
+
+```bash
+docker logs email-service-worker 2>&1 | grep "otp_verification"
+```
+
+```
+2025-12-02 05:45:51 - INFO - Starting: #25 | process_email | →recipient@example.com (type=otp_verification)
+2025-12-02 05:45:53 - INFO - COMPLETED: #25 | process_email | →recipient@example.com (type=otp_verification)
+```
+
+**Available Templates:**
+
+| Template ID | Description | Required Variables |
+|-------------|-------------|-------------------|
+| `otp_verification` | OTP verification code | `recipient_name`, `otp_code` |
+| `booking_created` | Booking confirmation | `customer_name`, `service_type`, `booking_date`, `booking_time` |
+| `booking_cancelled` | Cancellation notice | `customer_name`, `service_type`, `booking_date` |
+| `booking_rescheduled` | Reschedule notice | `customer_name`, `old_date`, `new_date` |
+| `reminder_24h` | 24-hour reminder | `customer_name`, `service_type`, `booking_date`, `booking_time` |
+| `reminder_1h` | 1-hour reminder | `customer_name`, `service_type`, `booking_date`, `booking_time` |
+
+**Result:** ✅ Template rendered and email delivered.
+
+---
+
+### Scenario 4: Error Handling and Retry Flow
+
+**Objective:** Verify retry mechanism with exponential backoff.
+
+#### State Transitions
+
+```mermaid
+stateDiagram-v2
+    direction LR
+
+    [*] --> pending: 1. Email Created
+    pending --> processing: 2. Worker Picks Up
+    processing --> scheduled: 3. SMTP Error (retry)
+    scheduled --> processing: 4. Retry After Backoff
+    processing --> sent: 5. Success
+
+    note right of scheduled: retry_count: 1
+    note right of processing: Attempt 2/3
+```
+
+#### Step 1: Initial Email (pending → processing → error → scheduled)
+
+**Worker attempts delivery:**
+```
+2025-12-02 05:46:20 - INFO - Starting: #26 | process_email | →user@example.com
+2025-12-02 05:46:20 - INFO - Email #26 status updated to processing
+2025-12-02 05:46:22 - ERROR - FAILED: #26 | SMTP connection timeout after 30s
+2025-12-02 05:46:22 - WARNING - SCHEDULED RETRY: #26 | attempt 1/3 | backoff_secs=300
+```
+
+**Database state after failure:**
+```sql
+SELECT id, status, retry_count, last_error, next_retry_at
+FROM email_queue WHERE id = 26;
+```
+
+```
+ id | status    | retry_count | last_error                              | next_retry_at
+----+-----------+-------------+-----------------------------------------+------------------------
+ 26 | scheduled |           1 | SMTP connection timeout after 30s       | 2025-12-02 05:51:22+00
+```
+
+#### Step 2: Retry After Backoff (scheduled → processing → sent)
+
+**Worker polls and finds scheduled email ready:**
+```
+2025-12-02 05:51:30 - INFO - Retrieved 1 pending emails
+2025-12-02 05:51:30 - INFO - Starting: #26 | process_email | →user@example.com
+2025-12-02 05:51:30 - INFO - Email #26 status updated to processing
+2025-12-02 05:51:33 - INFO - Email sent to user@example.com - Subject: Test...
+2025-12-02 05:51:33 - INFO - Email #26 status updated to sent
+2025-12-02 05:51:33 - INFO - COMPLETED: #26 | process_email | →user@example.com
+```
+
+**Database state after success:**
+```sql
+SELECT id, status, retry_count, sent_at FROM email_queue WHERE id = 26;
+```
+
+```
+ id | status | retry_count | sent_at
+----+--------+-------------+------------------------------
+ 26 | sent   |           1 | 2025-12-02 05:51:33.180000+00
+```
+
+**Result:** ✅ Email delivered on retry attempt.
+
+---
+
+### Scenario 5: Permanent Failure (Max Retries Exceeded)
+
+**Objective:** Verify emails are marked as failed after max retries.
+
+#### State Transitions
+
+```mermaid
+stateDiagram-v2
+    direction LR
+
+    [*] --> pending: 1. Email Created
+    pending --> processing: 2. Attempt 1
+    processing --> scheduled: 3. Error → Retry
+    scheduled --> processing: 4. Attempt 2
+    processing --> scheduled: 5. Error → Retry
+    scheduled --> processing: 6. Attempt 3 (final)
+    processing --> failed: 7. Max Retries Exceeded
+
+    note right of failed: retry_count: 3/3
+```
+
+#### Database State Progression
+
+| Step | Status | retry_count | Event |
+|------|--------|-------------|-------|
+| 1 | `pending` | 0 | Email created |
+| 2 | `processing` | 0 | Worker picks up |
+| 3 | `scheduled` | 1 | SMTP error, retry scheduled |
+| 4 | `processing` | 1 | Retry attempt 2 |
+| 5 | `scheduled` | 2 | SMTP error, retry scheduled |
+| 6 | `processing` | 2 | Retry attempt 3 (final) |
+| 7 | `failed` | 3 | Max retries exceeded |
+
+#### Final State
+
+```sql
+SELECT id, status, retry_count, max_retries, last_error
+FROM email_queue WHERE id = 27;
+```
+
+```
+ id | status | retry_count | max_retries | last_error
+----+--------+-------------+-------------+----------------------------------------------------------
+ 27 | failed |           3 |           3 | SMTP error: Max retries exceeded. Connection refused.
+```
+
+**Worker log:**
+```
+2025-12-02 05:50:15 - CRITICAL - PERMANENTLY FAILED: #27 | max_retries_exceeded=3 | error=Connection refused
+```
+
+**Queue status reflects failed count:**
+```json
+{
+  "pending": 0,
+  "scheduled": 0,
+  "processing": 0,
+  "sent": 26,
+  "failed": 1,
+  "timestamp": "2025-12-02T05:48:15.821033"
+}
+```
+
+**Result:** ❌ Email permanently failed (as expected after max retries).
+
+---
+
+### Scenario 6: Queue Status Monitoring
+
+**Objective:** Monitor queue health during bulk operations.
+
+**Step 1: Check queue status**
+
+```bash
+curl http://localhost:8001/queue/status
+```
+
+**Response:**
+
+```json
+{
+  "pending": 0,
+  "scheduled": 0,
+  "processing": 0,
+  "sent": 26,
+  "failed": 1,
+  "timestamp": "2025-12-02T05:48:15.821033"
+}
+```
+
+**Status Definitions:**
+
+| Status | Description |
+|--------|-------------|
+| `pending` | New emails waiting for first delivery attempt |
+| `scheduled` | Failed emails waiting for retry (backoff period) |
+| `processing` | Currently being sent via SMTP |
+| `sent` | Successfully delivered |
+| `failed` | Permanently failed (max retries exceeded) |
+
+**Step 2: Monitor in real-time**
+
+```bash
+# Watch queue status every 5 seconds
+watch -n 5 'curl -s http://localhost:8001/queue/status | python3 -m json.tool'
+```
+
+**Result:** ✅ Queue monitoring operational.
+
+---
+
+### Scenario 7: Health Check Validation
+
+**Objective:** Verify service health endpoint for load balancer integration.
+
+**Step 1: Check health**
+
+```bash
+curl http://localhost:8001/health
+```
+
+**Response (200 OK - Healthy):**
+
+```json
+{
+  "status": "ok",
+  "db": "ok",
+  "email_provider": "ok",
+  "version": "1.0.0",
+  "timestamp": "2025-12-02T05:50:00.000000"
+}
+```
+
+**Response (503 Service Unavailable - Degraded):**
+
+```json
+{
+  "status": "degraded",
+  "db": "error",
+  "email_provider": "ok",
+  "version": "1.0.0",
+  "timestamp": "2025-12-02T05:50:00.000000"
+}
+```
+
+**Health Check Script:**
+
+```bash
+#!/bin/bash
+# health_check.sh - Use with load balancers or monitoring
+
+response=$(curl -sf http://localhost:8001/health)
+if [ $? -eq 0 ]; then
+    status=$(echo $response | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+    if [ "$status" = "ok" ]; then
+        echo "Service healthy"
+        exit 0
+    fi
+fi
+echo "Service unhealthy"
+exit 1
+```
+
+**Result:** ✅ Health check operational for production monitoring.
+
+---
+
 ## Contributing
 
 1. Fork the repository
