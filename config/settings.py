@@ -12,10 +12,9 @@ Version: 1.0.0
 
 from pathlib import Path
 
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
 from email_service.core.exceptions import EmailConfigError
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class EmailConfig(BaseSettings):
@@ -327,6 +326,25 @@ class EmailConfig(BaseSettings):
         if not v.strip():
             raise ValueError("SMTP_FROM_EMAIL cannot be empty")
         return v.strip()
+
+    @model_validator(mode="after")
+    def validate_pool_sizes(self) -> "EmailConfig":
+        """D007 fix: Validate database pool size configuration.
+
+        Ensures DB_POOL_SIZE_MIN is not greater than DB_POOL_SIZE_MAX.
+
+        Returns:
+            Validated EmailConfig instance.
+
+        Raises:
+            ValueError: If MIN > MAX.
+        """
+        if self.DB_POOL_SIZE_MIN > self.DB_POOL_SIZE_MAX:
+            raise ValueError(
+                f"DB_POOL_SIZE_MIN ({self.DB_POOL_SIZE_MIN}) cannot be greater "
+                f"than DB_POOL_SIZE_MAX ({self.DB_POOL_SIZE_MAX})"
+            )
+        return self
 
     def validate_smtp_config(self) -> None:
         """Validate complete SMTP configuration.

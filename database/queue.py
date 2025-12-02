@@ -21,13 +21,12 @@ from functools import wraps
 from typing import Any, TypeVar
 
 import psycopg2
-from psycopg2 import pool
-from psycopg2.extras import RealDictCursor
-
 from email_service.config import EmailConfig
 from email_service.core.exceptions import EmailQueueError
 from email_service.core.logger import get_logger
 from email_service.models.email import EmailRecord, EmailStatus, EmailType
+from psycopg2 import pool
+from psycopg2.extras import RealDictCursor
 
 logger = get_logger(__name__)
 
@@ -481,18 +480,22 @@ class EmailQueueManager:
                     return EmailRecord(**row_dict)
 
             except psycopg2.OperationalError as e:
+                # D004 fix: Add rollback before retry
+                conn.rollback()
                 if attempt < max_retries - 1:
                     logger.warning(f"Connection error, retrying ({attempt + 1}/{max_retries})")
                     continue
                 logger.error(f"Failed to get email #{email_id}: {e}")
                 raise EmailQueueError(f"Failed to retrieve email: {e}") from e
             except Exception as e:
+                conn.rollback()
                 logger.error(f"Failed to get email #{email_id}: {e}")
                 raise EmailQueueError(f"Failed to retrieve email: {e}") from e
             finally:
                 self._return_connection(conn)
 
-        return None
+        # D010 fix: This should never be reached, but raise if it is
+        raise EmailQueueError(f"Failed to get email #{email_id} after all retries")
 
     def cleanup_old_emails(self, days_to_keep: int = 90) -> int:
         """Cleanup old sent/failed emails.
@@ -564,10 +567,12 @@ class EmailQueueManager:
                         """
                     )
                     rows = cur.fetchall()
-
-                return {row["status"]: row["count"] for row in rows}
+                    # D011 fix: Explicit handling for read-only query
+                    result = {row["status"]: row["count"] for row in rows}
+                    return result
 
             except psycopg2.OperationalError as e:
+                conn.rollback()
                 if attempt < max_retries - 1:
                     logger.warning(
                         f"Connection error, retrying ({attempt + 1}/{max_retries})"
@@ -576,12 +581,14 @@ class EmailQueueManager:
                 logger.error(f"Failed to get queue stats: {e}")
                 raise EmailQueueError(f"Failed to get queue stats: {e}") from e
             except Exception as e:
+                conn.rollback()
                 logger.error(f"Failed to get queue stats: {e}")
                 raise EmailQueueError(f"Failed to get queue stats: {e}") from e
             finally:
                 self._return_connection(conn)
 
-        return {}
+        # D010 fix: Should never be reached
+        raise EmailQueueError("Failed to get queue stats after all retries")
 
     def health_check(self) -> bool:
         """Check database connectivity.

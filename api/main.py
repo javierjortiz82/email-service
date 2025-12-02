@@ -17,16 +17,13 @@ Version: 2.0.0
 from __future__ import annotations
 
 import hashlib
+import threading
 import time
 import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Annotated
-
-from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
-from fastapi.security import APIKeyHeader
 
 from email_service.api.schemas import (
     EmailRequest,
@@ -39,6 +36,9 @@ from email_service.config import EmailConfig
 from email_service.core.logger import get_logger, setup_logging
 from email_service.database.queue import EmailQueueManager
 from email_service.models.email import EmailStatus, EmailType
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 
 logger = get_logger(__name__)
 
@@ -82,11 +82,12 @@ def get_queue_manager() -> EmailQueueManager:
 # =============================================================================
 @dataclass
 class RateLimiter:
-    """Simple in-memory rate limiter using sliding window."""
+    """Thread-safe in-memory rate limiter using sliding window."""
 
     requests_per_minute: int = 60
     requests_per_second: int = 10
     _requests: dict = field(default_factory=lambda: defaultdict(list))
+    _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def _clean_old_requests(self, client_id: str, window_seconds: int) -> None:
         """Remove requests outside the time window."""
@@ -94,26 +95,31 @@ class RateLimiter:
         self._requests[client_id] = [
             t for t in self._requests[client_id] if now - t < window_seconds
         ]
+        # D001 fix: Remove empty client entries to prevent memory leak
+        if not self._requests[client_id]:
+            del self._requests[client_id]
 
     def is_allowed(self, client_id: str) -> bool:
-        """Check if request is allowed under rate limits."""
-        now = time.time()
+        """Check if request is allowed under rate limits (thread-safe)."""
+        # D002 fix: Use lock for thread safety
+        with self._lock:
+            now = time.time()
 
-        # Clean requests older than 60 seconds
-        self._clean_old_requests(client_id, 60)
+            # Clean requests older than 60 seconds
+            self._clean_old_requests(client_id, 60)
 
-        # Check per-second limit (last 1 second)
-        recent_second = [t for t in self._requests[client_id] if now - t < 1]
-        if len(recent_second) >= self.requests_per_second:
-            return False
+            # Check per-second limit (last 1 second)
+            recent_second = [t for t in self._requests.get(client_id, []) if now - t < 1]
+            if len(recent_second) >= self.requests_per_second:
+                return False
 
-        # Check per-minute limit
-        if len(self._requests[client_id]) >= self.requests_per_minute:
-            return False
+            # Check per-minute limit
+            if len(self._requests.get(client_id, [])) >= self.requests_per_minute:
+                return False
 
-        # Record this request
-        self._requests[client_id].append(now)
-        return True
+            # Record this request
+            self._requests[client_id].append(now)
+            return True
 
     def get_client_id(self, request: Request) -> str:
         """Get client identifier from request."""
@@ -122,7 +128,8 @@ class RateLimiter:
         if forwarded:
             client_ip = forwarded.split(",")[0].strip()
         else:
-            client_ip = request.client.host if request.client else "unknown"
+            # D012 fix: Safe attribute access
+            client_ip = getattr(request.client, "host", "unknown") if request.client else "unknown"
 
         # Hash the IP for privacy
         return hashlib.sha256(client_ip.encode()).hexdigest()[:16]
@@ -191,6 +198,12 @@ async def check_rate_limit(request: Request) -> None:
 
 
 # =============================================================================
+# Module-level Configuration (D006 fix: Single instantiation)
+# =============================================================================
+_config = EmailConfig()
+
+
+# =============================================================================
 # Lifespan Context Manager
 # =============================================================================
 @asynccontextmanager
@@ -198,19 +211,18 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown."""
     global app_state
 
-    # Startup
-    config = EmailConfig()
-    app_state = AppState(config=config)
+    # Startup - use module-level config
+    app_state = AppState(config=_config)
 
     setup_logging(
-        log_level=config.LOG_LEVEL,
-        enable_file=config.LOG_TO_FILE,
-        settings=config,
+        log_level=_config.LOG_LEVEL,
+        enable_file=_config.LOG_TO_FILE,
+        settings=_config,
     )
 
     try:
-        app_state.queue_manager = EmailQueueManager(config)
-        logger.info(f"Database connected: {config.SCHEMA_NAME}.email_queue")
+        app_state.queue_manager = EmailQueueManager(_config)
+        logger.info(f"Database connected: {_config.SCHEMA_NAME}.email_queue")
     except Exception as e:
         logger.error(f"Failed to start API: {e}")
         raise
@@ -218,10 +230,10 @@ async def lifespan(app: FastAPI):
     yield  # Application runs here
 
     # Shutdown
-    logger.info(f"Shutting down {config.SERVICE_NAME}...")
+    logger.info(f"Shutting down {_config.SERVICE_NAME}...")
     if app_state and app_state.queue_manager:
         app_state.queue_manager.close()
-    logger.info(f"{config.SERVICE_NAME} stopped")
+    logger.info(f"{_config.SERVICE_NAME} stopped")
 
 
 # =============================================================================
@@ -229,12 +241,10 @@ async def lifespan(app: FastAPI):
 # =============================================================================
 def create_app() -> FastAPI:
     """Create and configure FastAPI application."""
-    config = EmailConfig()
-
     application = FastAPI(
-        title=config.SERVICE_NAME,
+        title=_config.SERVICE_NAME,
         description="Production-ready email sending microservice with queue management",
-        version=config.SERVICE_VERSION,
+        version=_config.SERVICE_VERSION,
         lifespan=lifespan,
     )
 

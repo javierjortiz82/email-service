@@ -12,7 +12,6 @@ import smtplib
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from email_service.clients.smtp import SMTPClient
 from email_service.core.exceptions import SMTPClientError
 

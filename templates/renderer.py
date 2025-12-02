@@ -11,12 +11,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader, TemplateNotFound
-
 from email_service.config import EmailConfig
 from email_service.core.exceptions import TemplateRenderError
 from email_service.core.logger import get_logger
 from email_service.models.email import EmailType
+from jinja2 import Environment, FileSystemLoader, TemplateNotFound, select_autoescape
 
 logger = get_logger(__name__)
 
@@ -55,9 +54,10 @@ class TemplateRenderer:
                 f"Cannot create template directory {self.template_dir}: {e}"
             ) from e
 
+        # D009 fix: Use select_autoescape to only escape HTML files, not .txt
         env = Environment(
             loader=FileSystemLoader(self.template_dir),
-            autoescape=True,
+            autoescape=select_autoescape(["html", "htm", "xml"]),
             trim_blocks=True,
             lstrip_blocks=True,
         )
@@ -200,6 +200,19 @@ Fecha: {context.get('booking_date', 'N/A')}
 Hora: {context.get('booking_time', 'N/A')}
 
 Te esperamos!
+            """.strip()
+
+        # D008 fix: Add OTP verification fallback
+        elif email_type == EmailType.OTP_VERIFICATION:
+            otp_code = context.get("otp_code", "N/A")
+            expiry_minutes = context.get("expiry_minutes", 10)
+            return f"""
+Hola {customer_name},
+
+Tu codigo de verificacion es: {otp_code}
+
+Este codigo expira en {expiry_minutes} minutos.
+No compartas este codigo con nadie.
             """.strip()
 
         else:

@@ -14,7 +14,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from email_service.core.exceptions import TemplateRenderError
 from email_service.models.email import EmailType
 from email_service.templates.renderer import TemplateRenderer
@@ -301,11 +300,14 @@ class TestJinja2Environment:
     """Tests for Jinja2 environment configuration."""
 
     def test_autoescape_enabled(self, temp_template_dir):
-        """Test that autoescape is enabled for security."""
+        """Test that autoescape is enabled for HTML files (D009 fix: selective autoescape)."""
         renderer = TemplateRenderer(template_dir=temp_template_dir)
 
-        # Autoescape should be enabled
-        assert renderer.env.autoescape is True
+        # Autoescape should be a callable (from select_autoescape)
+        # It returns True for .html files, False for .txt files
+        assert callable(renderer.env.autoescape)
+        assert renderer.env.autoescape("test.html") is True
+        assert renderer.env.autoescape("test.txt") is False
 
     def test_trim_blocks_enabled(self, temp_template_dir):
         """Test that trim_blocks is enabled."""

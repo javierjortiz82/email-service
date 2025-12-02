@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 
 import psycopg2
 import pytest
-
 from email_service.core.exceptions import EmailQueueError
 from email_service.database.queue import (
     EmailQueueManager,

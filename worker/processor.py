@@ -72,7 +72,8 @@ class EmailWorker:
 
             self.running = True
             self.processed_count = 0
-            self.failed_count = 0
+            self.failed_count = 0  # Permanent failures only
+            self.retry_count = 0   # D013 fix: Track retries separately
 
             # Concurrency control - limit parallel email sends
             self._concurrency = getattr(self.config, "EMAIL_WORKER_CONCURRENCY", 5)
@@ -118,6 +119,8 @@ class EmailWorker:
         logger.info("Shutting down email worker...")
         logger.info("=" * 80)
         self._print_stats()
+        # D003 fix: Close SMTP client before queue manager
+        self.smtp_client.close()
         self.queue_manager.close()
         logger.info("Email worker stopped cleanly")
         logger.info("=" * 80)
@@ -145,11 +148,9 @@ class EmailWorker:
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Count successes and failures
+            # D013 fix: Only count successes here - failures are counted in _handle_send_failure
             for result in results:
-                if isinstance(result, Exception):
-                    self.failed_count += 1
-                else:
+                if not isinstance(result, Exception):
                     self.processed_count += 1
 
         except Exception as e:
@@ -176,9 +177,7 @@ class EmailWorker:
 
         try:
             logger.info(f"Starting: {ctx}")
-
-            self.queue_manager.update_email_status(email.id, EmailStatus.PROCESSING)
-            logger.debug(f"Status marked PROCESSING: {ctx}")
+            # D005 fix: Removed redundant PROCESSING update - already set by get_pending_emails SQL
 
             body_html, body_text = self._prepare_email_content(email)
 
@@ -246,6 +245,8 @@ class EmailWorker:
                 error=error,
                 backoff_seconds=backoff,
             )
+            # D013 fix: Track retries separately
+            self.retry_count += 1
             logger.warning(
                 f"SCHEDULED RETRY: {ctx} | "
                 f"attempt {email.retry_count + 1}/{email.max_retries} | "
@@ -255,6 +256,8 @@ class EmailWorker:
             self.queue_manager.update_email_status(
                 email.id, EmailStatus.FAILED, error=error
             )
+            # D013 fix: Only increment failed_count for permanent failures
+            self.failed_count += 1
             logger.critical(
                 f"PERMANENTLY FAILED: {ctx} | "
                 f"max_retries_exceeded={email.max_retries} | "
@@ -263,13 +266,16 @@ class EmailWorker:
 
     def _print_stats(self) -> None:
         """Print worker statistics on shutdown."""
-        total = self.processed_count + self.failed_count
-        success_rate = (self.processed_count / total * 100) if total > 0 else 0
+        # D013 fix: More accurate statistics
+        total_attempts = self.processed_count + self.failed_count + self.retry_count
+        total_emails = self.processed_count + self.failed_count
+        success_rate = (self.processed_count / total_emails * 100) if total_emails > 0 else 0
 
         logger.info("Email Worker Statistics:")
-        logger.info(f"   Total processed: {total}")
+        logger.info(f"   Total attempts: {total_attempts}")
         logger.info(f"   Successfully sent: {self.processed_count}")
-        logger.info(f"   Failed: {self.failed_count}")
+        logger.info(f"   Scheduled for retry: {self.retry_count}")
+        logger.info(f"   Permanently failed: {self.failed_count}")
         logger.info(f"   Success rate: {success_rate:.1f}%")
 
 

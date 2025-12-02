@@ -239,11 +239,10 @@ def test_client(mock_config: MagicMock, mock_queue_manager: MagicMock):
     """Create a FastAPI test client with mocked dependencies."""
     from contextlib import asynccontextmanager
 
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-
     import email_service.api.main as main_module
     from email_service.api.main import AppState
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
 
     # Reset rate limiter before each test
     main_module.rate_limiter._requests.clear()
