@@ -311,13 +311,13 @@ class EmailQueueManager:
                         if template_context_raw and isinstance(template_context_raw, str):
                             row_dict["template_context"] = json.loads(template_context_raw)
 
-                        email_records.append(
-                            EmailRecord(
-                                **row_dict,
-                                created_at=row_dict.get("created_at", datetime.now()),
-                                updated_at=row_dict.get("updated_at", datetime.now()),
-                            )
-                        )
+                        # Set default timestamps if not present in database row
+                        if "created_at" not in row_dict or row_dict["created_at"] is None:
+                            row_dict["created_at"] = datetime.now()
+                        if "updated_at" not in row_dict or row_dict["updated_at"] is None:
+                            row_dict["updated_at"] = datetime.now()
+
+                        email_records.append(EmailRecord(**row_dict))
 
                     logger.info(f"Retrieved {len(email_records)} pending emails")
                     return email_records
