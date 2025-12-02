@@ -55,22 +55,15 @@ async def startup_event():
     """Initialize services on startup."""
     global config, queue_manager
 
-    setup_logging(log_level=config.LOG_LEVEL, enable_file=config.LOG_TO_FILE)
-
-    logger.info("=" * 60)
-    logger.info(f"STARTING {config.SERVICE_NAME.upper()}")
-    logger.info("=" * 60)
-    logger.info(f"Service: {config.SERVICE_NAME}")
-    logger.info(f"Version: {config.SERVICE_VERSION}")
-    logger.info(f"Host: {config.API_HOST}")
-    logger.info(f"Port: {config.API_PORT}")
-    logger.info("=" * 60)
+    setup_logging(
+        log_level=config.LOG_LEVEL,
+        enable_file=config.LOG_TO_FILE,
+        settings=config,
+    )
 
     try:
         queue_manager = EmailQueueManager(config)
         logger.info(f"Database connected: {config.SCHEMA_NAME}.email_queue")
-        logger.info(f"{config.SERVICE_NAME} started successfully on port {config.API_PORT}")
-        logger.info("=" * 60)
     except Exception as e:
         logger.error(f"Failed to start API: {e}")
         raise

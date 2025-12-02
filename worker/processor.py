@@ -45,11 +45,8 @@ class EmailWorker:
             file_level="DEBUG",
             console_level=self.config.LOG_LEVEL,
             enable_file=self.config.LOG_TO_FILE,
+            settings=self.config,
         )
-
-        logger.info("=" * 80)
-        logger.info("INITIALIZING EMAIL WORKER")
-        logger.info("=" * 80)
 
         try:
             logger.debug("Email configuration loaded")

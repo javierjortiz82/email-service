@@ -10,17 +10,22 @@ Features:
     - Structured logging with context
     - Best practices: ISO 8601 timestamps, proper exception handling
     - Performance optimized for async operations
+    - Startup banner with configuration summary
 
 Author: Odiseo
 Created: 2025-10-18
-Version: 2.0.0
+Version: 2.1.0
 """
 
 import logging
 import logging.handlers
+import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from email_service.config.settings import EmailConfig
 
 # Global configuration
 _ROOT_LOGGER: Optional[logging.Logger] = None
@@ -40,6 +45,206 @@ _MODULE_LEVELS = {
     "email_service.config": logging.INFO,
 }
 
+# Flag file to track if banner was already printed (for multi-worker scenarios)
+_BANNER_FLAG_FILE = "/tmp/.email_service_banner_printed"
+_BANNER_FLAG_PATH = Path(_BANNER_FLAG_FILE)
+
+# Module-level flag to track if this process printed the banner
+_banner_printed_by_this_process = False
+
+# ============================================================================
+# ANSI Color Codes
+# ============================================================================
+COLORS = {
+    "reset": "\033[0m",
+    "bold": "\033[1m",
+    "dim": "\033[2m",
+    "cyan": "\033[36m",
+    "green": "\033[32m",
+    "yellow": "\033[33m",
+    "blue": "\033[34m",
+    "magenta": "\033[35m",
+    "white": "\033[97m",
+    "red": "\033[31m",
+    # Bright variants for better visibility
+    "b_blue": "\033[94m",
+    "b_cyan": "\033[96m",
+    "b_green": "\033[92m",
+    "b_yellow": "\033[93m",
+    "b_magenta": "\033[95m",
+}
+
+# Color shortcuts for banner
+_B = COLORS["bold"]
+_R = COLORS["reset"]
+_BC = COLORS["b_cyan"]
+_BG = COLORS["b_green"]
+_BY = COLORS["b_yellow"]
+_BM = COLORS["b_magenta"]
+_BB = COLORS["b_blue"]
+
+# fmt: off
+BANNER = f"""
+{_B}{_BC} ███████╗{_BG} ███╗   ███╗{_BY}  █████╗ {_BM} ██╗{_BB} ██╗     {_R}
+{_BC} ██╔════╝{_BG} ████╗ ████║{_BY} ██╔══██╗{_BM} ██║{_BB} ██║     {_R}
+{_BC} █████╗  {_BG} ██╔████╔██║{_BY} ███████║{_BM} ██║{_BB} ██║     {_R}
+{_BC} ██╔══╝  {_BG} ██║╚██╔╝██║{_BY} ██╔══██║{_BM} ██║{_BB} ██║     {_R}
+{_BC} ███████╗{_BG} ██║ ╚═╝ ██║{_BY} ██║  ██║{_BM} ██║{_BB} ███████╗{_R}
+{_BC} ╚══════╝{_BG} ╚═╝     ╚═╝{_BY} ╚═╝  ╚═╝{_BM} ╚═╝{_BB} ╚══════╝{_R}
+{_R}"""  # noqa: E501
+# fmt: on
+
+
+def _try_acquire_banner_lock() -> bool:
+    """Try to acquire banner lock atomically using exclusive file creation.
+
+    Returns:
+        True if this process should print the banner, False otherwise.
+    """
+    try:
+        # O_CREAT | O_EXCL ensures atomic creation - fails if file exists
+        fd = os.open(_BANNER_FLAG_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except OSError:
+        return False
+
+
+def _cleanup_banner_flag() -> None:
+    """Remove banner flag file for fresh container starts."""
+    try:
+        if _BANNER_FLAG_PATH.exists():
+            _BANNER_FLAG_PATH.unlink()
+    except OSError:
+        pass
+
+
+def _mask_password(password: str) -> str:
+    """Mask password for display, showing only first and last char.
+
+    Args:
+        password: Password to mask.
+
+    Returns:
+        Masked password string.
+    """
+    if not password:
+        return "(not set)"
+    if len(password) <= 2:
+        return "***"
+    return f"{password[0]}{'*' * (len(password) - 2)}{password[-1]}"
+
+
+def print_banner() -> None:
+    """Print the service startup banner."""
+    global _banner_printed_by_this_process  # noqa: PLW0603
+    if not _try_acquire_banner_lock():
+        return
+
+    _banner_printed_by_this_process = True
+    print(BANNER)
+    print(f"{COLORS['dim']}{'─' * 72}{COLORS['reset']}")
+    print(
+        f"{COLORS['cyan']}{COLORS['bold']}  "
+        f"Odiseo Email Microservice{COLORS['reset']}"
+    )
+    print(f"{COLORS['dim']}{'─' * 72}{COLORS['reset']}\n")
+
+
+def print_config_summary(settings: "EmailConfig") -> None:
+    """Print a formatted configuration summary organized by categories.
+
+    Args:
+        settings: EmailConfig instance with loaded configuration.
+    """
+    if not _banner_printed_by_this_process:
+        return  # Banner wasn't printed by this process
+
+    c = COLORS
+
+    def _line(label: str, value: str, color: str = "cyan") -> None:
+        print(f"  {c['dim']}│{c['reset']} {label:<26} {c[color]}{value}{c['reset']}")
+
+    def _header(icon: str, title: str, color: str) -> None:
+        print(f"\n  {c[color]}{icon} {title}{c['reset']}")
+        print(f"  {c['dim']}├{'─' * 50}{c['reset']}")
+
+    # =========================================================================
+    # Service Configuration
+    # =========================================================================
+    _header("▶", "Service Configuration", "green")
+    _line("Service Name", settings.SERVICE_NAME)
+    _line("Version", settings.SERVICE_VERSION)
+    _line("Host", settings.API_HOST)
+    _line("Port", str(settings.API_PORT))
+
+    # =========================================================================
+    # Database Configuration
+    # =========================================================================
+    _header("▶", "Database Configuration", "blue")
+    # Mask password in DATABASE_URL for display
+    db_url = settings.DATABASE_URL
+    if "@" in db_url:
+        # postgresql://user:pass@host:port/db -> postgresql://user:***@host:port/db
+        parts = db_url.split("@")
+        auth_part = parts[0]
+        if ":" in auth_part.split("//")[-1]:
+            user_pass = auth_part.split("//")[-1]
+            user = user_pass.split(":")[0]
+            masked_url = f"{auth_part.split('//')[0]}//{user}:***@{parts[1]}"
+        else:
+            masked_url = db_url
+    else:
+        masked_url = db_url
+    _line("Database URL", masked_url[:45] + "..." if len(masked_url) > 45 else masked_url)
+    _line("Schema", settings.SCHEMA_NAME)
+
+    # =========================================================================
+    # SMTP Configuration
+    # =========================================================================
+    _header("▶", "SMTP Configuration", "magenta")
+    _line("Host", settings.SMTP_HOST)
+    _line("Port", str(settings.SMTP_PORT))
+    _line("User", settings.SMTP_USER or "(not set)", "yellow" if not settings.SMTP_USER else "cyan")
+    _line("Password", _mask_password(settings.SMTP_PASSWORD), "yellow" if not settings.SMTP_PASSWORD else "cyan")
+    _line("From Email", settings.SMTP_FROM_EMAIL)
+    _line("From Name", settings.SMTP_FROM_NAME)
+    _line("TLS Enabled", str(settings.SMTP_USE_TLS).lower(), "green" if settings.SMTP_USE_TLS else "yellow")
+    _line("Timeout", f"{settings.SMTP_TIMEOUT}s")
+
+    # =========================================================================
+    # Worker Configuration
+    # =========================================================================
+    _header("▶", "Worker Configuration", "cyan")
+    _line("Poll Interval", f"{settings.EMAIL_WORKER_POLL_INTERVAL}s")
+    _line("Batch Size", str(settings.EMAIL_WORKER_BATCH_SIZE))
+    _line("Max Retry Attempts", str(settings.EMAIL_RETRY_MAX_ATTEMPTS))
+    _line("Backoff (initial)", f"{settings.EMAIL_RETRY_BACKOFF_SECONDS}s")
+
+    # =========================================================================
+    # Logging Configuration
+    # =========================================================================
+    _header("▶", "Logging Configuration", "yellow")
+    _line("Level", settings.LOG_LEVEL, "green")
+    _line("Log to File", str(settings.LOG_TO_FILE).lower())
+    _line("Directory", settings.LOG_DIR)
+    _line("Max File Size", f"{settings.LOG_MAX_SIZE_MB} MB")
+    _line("Backup Count", str(settings.LOG_BACKUP_COUNT))
+
+    # =========================================================================
+    # Footer
+    # =========================================================================
+    print(f"\n{c['dim']}{'─' * 72}{c['reset']}")
+    print(
+        f"  {c['green']}{c['bold']}✓ Service ready{c['reset']} "
+        f"{c['dim']}│{c['reset']} "
+        f"Docs: {c['cyan']}http://localhost:{settings.API_PORT}/docs{c['reset']}"
+    )
+    print(f"{c['dim']}{'─' * 72}{c['reset']}\n")
+
 
 def setup_logging(
     log_dir: Optional[Path] = None,
@@ -47,6 +252,7 @@ def setup_logging(
     file_level: str = "DEBUG",
     console_level: str = "INFO",
     enable_file: bool = True,
+    settings: Optional["EmailConfig"] = None,
 ) -> None:
     """Configure root logger with file and console handlers.
 
@@ -58,12 +264,14 @@ def setup_logging(
         file_level: File handler level (usually DEBUG for comprehensive logging).
         console_level: Console handler level (usually INFO to reduce noise).
         enable_file: Whether to write logs to files.
+        settings: Optional EmailConfig for printing configuration summary.
 
     Example:
         setup_logging(
             log_level="INFO",
             file_level="DEBUG",
             console_level="WARNING",  # Only show warnings and errors on console
+            settings=config,
         )
     """
     global _ROOT_LOGGER, _LOG_DIR
@@ -132,6 +340,11 @@ def setup_logging(
         module_logger.setLevel(level)
 
     _ROOT_LOGGER = root_logger
+
+    # Print startup banner and config summary
+    print_banner()
+    if settings:
+        print_config_summary(settings)
 
 
 def get_logger(name: str, log_level: Optional[str] = None) -> logging.Logger:
