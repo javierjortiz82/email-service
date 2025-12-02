@@ -4,14 +4,29 @@ FastAPI application providing endpoints for email operations:
 - POST /emails: Send an email (queued for delivery)
 - GET /queue/status: Get queue statistics
 - GET /health: Service health check
+
+Security features:
+- API key authentication
+- Rate limiting
+- Sanitized error responses
+
+Author: Odiseo
+Version: 2.0.0
 """
 
 from __future__ import annotations
 
+import hashlib
+import time
 import uuid
+from collections import defaultdict
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 
 from email_service.api.schemas import (
     EmailRequest,
@@ -27,33 +42,165 @@ from email_service.models.email import EmailStatus, EmailType
 
 logger = get_logger(__name__)
 
-# Global instances
-config: EmailConfig | None = None
-queue_manager: EmailQueueManager | None = None
-app: FastAPI | None = None
+
+# =============================================================================
+# Application State (Dependency Injection)
+# =============================================================================
+@dataclass
+class AppState:
+    """Application state container for dependency injection."""
+
+    config: EmailConfig
+    queue_manager: EmailQueueManager | None = None
 
 
-def create_app() -> FastAPI:
-    """Create and configure FastAPI application."""
-    global config
+app_state: AppState | None = None
+
+
+def get_config() -> EmailConfig:
+    """Dependency: Get application configuration."""
+    if not app_state or not app_state.config:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service not initialized",
+        )
+    return app_state.config
+
+
+def get_queue_manager() -> EmailQueueManager:
+    """Dependency: Get queue manager instance."""
+    if not app_state or not app_state.queue_manager:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service not initialized",
+        )
+    return app_state.queue_manager
+
+
+# =============================================================================
+# Rate Limiting
+# =============================================================================
+@dataclass
+class RateLimiter:
+    """Simple in-memory rate limiter using sliding window."""
+
+    requests_per_minute: int = 60
+    requests_per_second: int = 10
+    _requests: dict = field(default_factory=lambda: defaultdict(list))
+
+    def _clean_old_requests(self, client_id: str, window_seconds: int) -> None:
+        """Remove requests outside the time window."""
+        now = time.time()
+        self._requests[client_id] = [
+            t for t in self._requests[client_id] if now - t < window_seconds
+        ]
+
+    def is_allowed(self, client_id: str) -> bool:
+        """Check if request is allowed under rate limits."""
+        now = time.time()
+
+        # Clean requests older than 60 seconds
+        self._clean_old_requests(client_id, 60)
+
+        # Check per-second limit (last 1 second)
+        recent_second = [t for t in self._requests[client_id] if now - t < 1]
+        if len(recent_second) >= self.requests_per_second:
+            return False
+
+        # Check per-minute limit
+        if len(self._requests[client_id]) >= self.requests_per_minute:
+            return False
+
+        # Record this request
+        self._requests[client_id].append(now)
+        return True
+
+    def get_client_id(self, request: Request) -> str:
+        """Get client identifier from request."""
+        # Use X-Forwarded-For if behind proxy, otherwise use client host
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            client_ip = forwarded.split(",")[0].strip()
+        else:
+            client_ip = request.client.host if request.client else "unknown"
+
+        # Hash the IP for privacy
+        return hashlib.sha256(client_ip.encode()).hexdigest()[:16]
+
+
+rate_limiter = RateLimiter()
+
+
+# =============================================================================
+# API Key Authentication
+# =============================================================================
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(
+    api_key: Annotated[str | None, Depends(API_KEY_HEADER)],
+    config: Annotated[EmailConfig, Depends(get_config)],
+) -> bool:
+    """Verify API key if authentication is enabled.
+
+    Returns True if:
+    - API_KEY is not configured (auth disabled)
+    - API_KEY matches the provided key
+    """
+    configured_key = getattr(config, "API_KEY", None)
+
+    # If no API key configured, authentication is disabled
+    if not configured_key:
+        return True
+
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key required",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+
+    if api_key != configured_key:
+        logger.warning("Invalid API key attempt")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+
+    return True
+
+
+# =============================================================================
+# Rate Limit Middleware
+# =============================================================================
+async def check_rate_limit(request: Request) -> None:
+    """Middleware to check rate limits."""
+    # Skip rate limiting for health checks
+    if request.url.path == "/health":
+        return
+
+    client_id = rate_limiter.get_client_id(request)
+    if not rate_limiter.is_allowed(client_id):
+        logger.warning(f"Rate limit exceeded for client: {client_id}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded. Please try again later.",
+            headers={"Retry-After": "60"},
+        )
+
+
+# =============================================================================
+# Lifespan Context Manager
+# =============================================================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan handler for startup/shutdown."""
+    global app_state
+
+    # Startup
     config = EmailConfig()
-
-    application = FastAPI(
-        title=config.SERVICE_NAME,
-        description="Production-ready email sending microservice with queue management",
-        version=config.SERVICE_VERSION,
-    )
-
-    return application
-
-
-app = create_app()
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup."""
-    global config, queue_manager
+    app_state = AppState(config=config)
 
     setup_logging(
         log_level=config.LOG_LEVEL,
@@ -62,72 +209,107 @@ async def startup_event():
     )
 
     try:
-        queue_manager = EmailQueueManager(config)
+        app_state.queue_manager = EmailQueueManager(config)
         logger.info(f"Database connected: {config.SCHEMA_NAME}.email_queue")
     except Exception as e:
         logger.error(f"Failed to start API: {e}")
         raise
 
+    yield  # Application runs here
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown."""
-    global queue_manager, config
-
+    # Shutdown
     logger.info(f"Shutting down {config.SERVICE_NAME}...")
-    if queue_manager:
-        queue_manager.close()
+    if app_state and app_state.queue_manager:
+        app_state.queue_manager.close()
     logger.info(f"{config.SERVICE_NAME} stopped")
 
 
+# =============================================================================
+# FastAPI Application
+# =============================================================================
+def create_app() -> FastAPI:
+    """Create and configure FastAPI application."""
+    config = EmailConfig()
+
+    application = FastAPI(
+        title=config.SERVICE_NAME,
+        description="Production-ready email sending microservice with queue management",
+        version=config.SERVICE_VERSION,
+        lifespan=lifespan,
+    )
+
+    return application
+
+
+app = create_app()
+
+
+# =============================================================================
+# Template Type Mapping
+# =============================================================================
+TEMPLATE_TYPE_MAP = {
+    "otp_verification": EmailType.OTP_VERIFICATION,
+    "booking_created": EmailType.BOOKING_CREATED,
+    "booking_cancelled": EmailType.BOOKING_CANCELLED,
+    "booking_rescheduled": EmailType.BOOKING_RESCHEDULED,
+    "reminder_24h": EmailType.REMINDER_24H,
+    "reminder_1h": EmailType.REMINDER_1H,
+}
+
+
+# =============================================================================
+# API Endpoints
+# =============================================================================
 @app.post(
     "/emails",
     response_model=EmailResponse,
     status_code=status.HTTP_202_ACCEPTED,
     responses={
         400: {"model": ErrorResponse, "description": "Invalid request"},
+        401: {"model": ErrorResponse, "description": "Unauthorized"},
+        429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
         500: {"model": ErrorResponse, "description": "Server error"},
     },
+    dependencies=[Depends(check_rate_limit)],
 )
-async def send_email(request: EmailRequest) -> EmailResponse:
-    """Queue an email for delivery."""
-    global queue_manager
+async def send_email(
+    request: EmailRequest,
+    queue_manager: Annotated[EmailQueueManager, Depends(get_queue_manager)],
+    _auth: Annotated[bool, Depends(verify_api_key)],
+) -> EmailResponse:
+    """Queue an email for delivery.
 
-    if not queue_manager:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized",
-        )
-
-    # Map template_id to EmailType
-    template_type_map = {
-        "otp_verification": EmailType.OTP_VERIFICATION,
-        "booking_created": EmailType.BOOKING_CREATED,
-        "booking_cancelled": EmailType.BOOKING_CANCELLED,
-        "booking_rescheduled": EmailType.BOOKING_RESCHEDULED,
-        "reminder_24h": EmailType.REMINDER_24H,
-        "reminder_1h": EmailType.REMINDER_1H,
-    }
-
+    Requires API key authentication if API_KEY is configured.
+    Subject to rate limiting (60 requests/minute, 10 requests/second).
+    """
     try:
         message_id = request.client_message_id or str(uuid.uuid4())
 
         # Determine email type based on template_id
         email_type = EmailType.TRANSACTIONAL
         if request.template_id:
-            email_type = template_type_map.get(request.template_id, EmailType.TRANSACTIONAL)
+            email_type = TEMPLATE_TYPE_MAP.get(
+                request.template_id, EmailType.TRANSACTIONAL
+            )
 
         for recipient in request.to:
             queue_manager.enqueue_email(
                 email_type=email_type,
                 recipient_email=recipient,
-                recipient_name=request.template_vars.get("recipient_name") if request.template_vars else None,
+                recipient_name=(
+                    request.template_vars.get("recipient_name")
+                    if request.template_vars
+                    else None
+                ),
                 subject=request.subject,
                 body_html=request.body,
                 template_context=request.template_vars if request.template_id else None,
             )
 
-        logger.info(f"Email queued: {message_id} to {len(request.to)} recipients (type={email_type.value})")
+        logger.info(
+            f"Email queued: {message_id} to {len(request.to)} recipients "
+            f"(type={email_type.value})"
+        )
 
         return EmailResponse(
             status="accepted",
@@ -136,60 +318,55 @@ async def send_email(request: EmailRequest) -> EmailResponse:
             detail="Email stored in queue",
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to queue email: {e}")
+        # Log full error details server-side
+        logger.error(f"Failed to queue email: {e}", exc_info=True)
+        # Return sanitized error to client
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to process email request",
         )
 
 
 @app.get(
     "/queue/status",
     response_model=QueueStatusResponse,
-    responses={500: {"model": ErrorResponse, "description": "Server error"}},
+    responses={
+        401: {"model": ErrorResponse, "description": "Unauthorized"},
+        500: {"model": ErrorResponse, "description": "Server error"},
+    },
 )
-async def get_queue_status() -> QueueStatusResponse:
-    """Get email queue statistics."""
-    global queue_manager, config
+async def get_queue_status_endpoint(
+    queue_manager: Annotated[EmailQueueManager, Depends(get_queue_manager)],
+    config: Annotated[EmailConfig, Depends(get_config)],
+    _auth: Annotated[bool, Depends(verify_api_key)],
+) -> QueueStatusResponse:
+    """Get email queue statistics.
 
-    if not queue_manager or not config:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized",
+    Requires API key authentication if API_KEY is configured.
+    """
+    try:
+        counts = queue_manager.get_queue_stats()
+
+        return QueueStatusResponse(
+            pending=counts.get(EmailStatus.PENDING.value, 0),
+            scheduled=counts.get(EmailStatus.SCHEDULED.value, 0),
+            processing=counts.get(EmailStatus.PROCESSING.value, 0),
+            sent=counts.get(EmailStatus.SENT.value, 0),
+            failed=counts.get(EmailStatus.FAILED.value, 0),
         )
 
-    try:
-        conn = queue_manager._get_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    SELECT status, COUNT(*) as count
-                    FROM {config.SCHEMA_NAME}.email_queue
-                    GROUP BY status
-                    """
-                )
-                rows = cur.fetchall()
-
-            counts = {row["status"]: row["count"] for row in rows}
-
-            return QueueStatusResponse(
-                pending=counts.get(EmailStatus.PENDING.value, 0),
-                scheduled=counts.get(EmailStatus.SCHEDULED.value, 0),
-                processing=counts.get(EmailStatus.PROCESSING.value, 0),
-                sent=counts.get(EmailStatus.SENT.value, 0),
-                failed=counts.get(EmailStatus.FAILED.value, 0),
-            )
-
-        finally:
-            queue_manager._return_connection(conn)
-
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to get queue status: {e}")
+        # Log full error details server-side
+        logger.error(f"Failed to get queue status: {e}", exc_info=True)
+        # Return sanitized error to client
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to retrieve queue status",
         )
 
 
@@ -198,29 +375,28 @@ async def get_queue_status() -> QueueStatusResponse:
     response_model=HealthResponse,
     responses={503: {"model": ErrorResponse, "description": "Service unhealthy"}},
 )
-async def health_check() -> HealthResponse:
-    """Check service health."""
-    global queue_manager, config
+async def health_check(
+    queue_manager: Annotated[EmailQueueManager, Depends(get_queue_manager)],
+    config: Annotated[EmailConfig, Depends(get_config)],
+) -> HealthResponse:
+    """Check service health.
 
+    No authentication required - used by load balancers and monitoring.
+    """
     db_status = "error"
     smtp_status = "error"
 
-    if queue_manager:
-        try:
-            conn = queue_manager._get_connection()
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-            queue_manager._return_connection(conn)
+    try:
+        if queue_manager.health_check():
             db_status = "ok"
-        except Exception as e:
-            logger.warning(f"Database health check failed: {e}")
+    except Exception as e:
+        logger.warning(f"Database health check failed: {e}")
 
-    if config:
-        try:
-            config.validate_smtp_config()
-            smtp_status = "ok"
-        except Exception:
-            smtp_status = "not_configured"
+    try:
+        config.validate_smtp_config()
+        smtp_status = "ok"
+    except Exception:
+        smtp_status = "not_configured"
 
     overall_status = "ok" if db_status == "ok" else "degraded"
 
@@ -240,6 +416,9 @@ async def health_check() -> HealthResponse:
     return response
 
 
+# =============================================================================
+# Entry Point
+# =============================================================================
 def run():
     """Run the API server."""
     import uvicorn

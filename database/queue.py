@@ -3,14 +3,21 @@
 Handles all database operations for the email queue system including
 enqueueing, retrieving, status updates, and retry logic.
 
-Version: 2.0.0
+Features:
+- Connection pooling with automatic validation
+- Retry decorator for transient failures
+- FOR UPDATE SKIP LOCKED for concurrent processing
+
+Author: Odiseo
+Version: 2.1.0
 """
 
 from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any
+from functools import wraps
+from typing import Any, Callable, TypeVar
 
 import psycopg2
 from psycopg2 import pool
@@ -22,6 +29,65 @@ from email_service.core.logger import get_logger
 from email_service.models.email import EmailRecord, EmailStatus, EmailType
 
 logger = get_logger(__name__)
+
+# Type variable for generic return types
+T = TypeVar("T")
+
+
+# =============================================================================
+# Retry Decorator
+# =============================================================================
+def with_db_retry(
+    max_retries: int = 2,
+    error_message: str = "Database operation failed",
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """Decorator for database operations with automatic retry on connection errors.
+
+    Args:
+        max_retries: Maximum retry attempts (default: 2).
+        error_message: Base error message for failures.
+
+    Returns:
+        Decorated function with retry logic.
+
+    Example:
+        @with_db_retry(max_retries=3, error_message="Failed to fetch email")
+        def _get_email(self, conn, email_id):
+            ...
+    """
+
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(self: "EmailQueueManager", *args: Any, **kwargs: Any) -> T:
+            last_error: Exception | None = None
+
+            for attempt in range(max_retries):
+                conn = self._get_connection()
+                try:
+                    result = func(self, conn, *args, **kwargs)
+                    return result
+                except psycopg2.OperationalError as e:
+                    conn.rollback()
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            f"Connection error in {func.__name__}, "
+                            f"retrying ({attempt + 1}/{max_retries})"
+                        )
+                        continue
+                    logger.error(f"{error_message} after {max_retries} retries: {e}")
+                except Exception as e:
+                    conn.rollback()
+                    logger.error(f"{error_message}: {e}")
+                    raise EmailQueueError(f"{error_message}: {e}") from e
+                finally:
+                    self._return_connection(conn)
+
+            raise EmailQueueError(f"{error_message}: {last_error}") from last_error
+
+        return wrapper
+
+    return decorator
 
 
 def _validate_connection(conn: psycopg2.extensions.connection) -> bool:
@@ -466,6 +532,67 @@ class EmailQueueManager:
                 self._return_connection(conn)
 
         return 0
+
+    def get_queue_stats(self) -> dict[str, int]:
+        """Get email queue statistics by status.
+
+        Returns:
+            Dictionary mapping status names to counts.
+
+        Raises:
+            EmailQueueError: If database operation fails.
+        """
+        max_retries = 2
+
+        for attempt in range(max_retries):
+            conn = self._get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        SELECT status, COUNT(*) as count
+                        FROM {self.config.SCHEMA_NAME}.email_queue
+                        GROUP BY status
+                        """
+                    )
+                    rows = cur.fetchall()
+
+                return {row["status"]: row["count"] for row in rows}
+
+            except psycopg2.OperationalError as e:
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"Connection error, retrying ({attempt + 1}/{max_retries})"
+                    )
+                    continue
+                logger.error(f"Failed to get queue stats: {e}")
+                raise EmailQueueError(f"Failed to get queue stats: {e}") from e
+            except Exception as e:
+                logger.error(f"Failed to get queue stats: {e}")
+                raise EmailQueueError(f"Failed to get queue stats: {e}") from e
+            finally:
+                self._return_connection(conn)
+
+        return {}
+
+    def health_check(self) -> bool:
+        """Check database connectivity.
+
+        Returns:
+            True if database is accessible, False otherwise.
+        """
+        try:
+            conn = self._get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
+                return True
+            finally:
+                self._return_connection(conn)
+        except Exception as e:
+            logger.warning(f"Health check failed: {e}")
+            return False
 
     def close(self) -> None:
         """Close all connections in pool."""

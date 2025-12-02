@@ -1,14 +1,23 @@
 """SMTP client for email delivery.
 
 Provides email sending via SMTP with support for Gmail, SendGrid, AWS SES,
-and compatible SMTP servers. Handles multipart emails, TLS/SSL, and error handling.
+and compatible SMTP servers. Features connection reuse for better performance.
 
-Version: 2.0.0
+Features:
+- Connection reuse with automatic refresh
+- TLS/SSL encryption
+- Multipart emails (HTML + plaintext)
+- Transient error detection for retry logic
+
+Author: Odiseo
+Version: 2.1.0
 """
 
 from __future__ import annotations
 
 import smtplib
+import threading
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -21,12 +30,19 @@ logger = get_logger(__name__)
 
 
 class SMTPClient:
-    """SMTP email delivery client.
+    """SMTP email delivery client with connection reuse.
 
     Sends emails via SMTP with support for multiple providers
-    (Gmail, SendGrid, AWS SES). Handles TLS/SSL encryption,
-    authentication, and multipart emails (HTML + plaintext).
+    (Gmail, SendGrid, AWS SES). Reuses connections for better
+    performance with automatic refresh on staleness.
+
+    Attributes:
+        config: SMTP configuration.
+        connection_timeout: Seconds before connection is considered stale.
     """
+
+    # Connection timeout in seconds (refresh after this time)
+    CONNECTION_TIMEOUT = 60
 
     def __init__(self, smtp_config: SMTPConfig | None = None) -> None:
         """Initialize SMTP client.
@@ -50,7 +66,87 @@ class SMTPClient:
                 timeout=int(config_dict["timeout"]),
             )
 
+        # Connection state
+        self._connection: smtplib.SMTP | None = None
+        self._last_used: float = 0
+        self._lock = threading.Lock()
+
         logger.info(f"SMTP Client initialized: {self.config.host}:{self.config.port}")
+
+    def _get_connection(self) -> smtplib.SMTP:
+        """Get or create SMTP connection with automatic refresh.
+
+        Returns:
+            Active SMTP connection.
+
+        Raises:
+            SMTPClientError: If connection cannot be established.
+        """
+        with self._lock:
+            now = time.time()
+
+            # Check if existing connection is valid
+            if self._connection and (now - self._last_used) < self.CONNECTION_TIMEOUT:
+                try:
+                    # Verify connection is still alive
+                    status = self._connection.noop()[0]
+                    if status == 250:
+                        self._last_used = now
+                        return self._connection
+                except (smtplib.SMTPException, OSError):
+                    logger.debug("Stale SMTP connection detected, reconnecting...")
+                    self._close_connection()
+
+            # Create new connection
+            return self._create_connection()
+
+    def _create_connection(self) -> smtplib.SMTP:
+        """Create new SMTP connection.
+
+        Returns:
+            New SMTP connection.
+
+        Raises:
+            SMTPClientError: If connection fails.
+        """
+        try:
+            logger.debug(f"Connecting to SMTP: {self.config.host}:{self.config.port}")
+            smtp = smtplib.SMTP(
+                self.config.host,
+                self.config.port,
+                timeout=self.config.timeout,
+            )
+
+            if self.config.use_tls:
+                logger.debug("Starting TLS...")
+                smtp.starttls()
+
+            logger.debug("Authenticating...")
+            smtp.login(self.config.username, self.config.password)
+
+            self._connection = smtp
+            self._last_used = time.time()
+
+            logger.debug("SMTP connection established")
+            return smtp
+
+        except Exception as e:
+            logger.error(f"Failed to establish SMTP connection: {e}")
+            raise SMTPClientError(
+                f"Failed to connect to SMTP server: {e}",
+                is_transient=self._is_transient_error(e),
+            ) from e
+
+    def _close_connection(self) -> None:
+        """Close existing SMTP connection safely."""
+        if self._connection:
+            try:
+                self._connection.quit()
+            except Exception:
+                pass
+            finally:
+                self._connection = None
+                self._last_used = 0
 
     def send_email(
         self,
@@ -89,10 +185,12 @@ class SMTPClient:
             part_html = MIMEText(body_html, "html", "utf-8")
             msg.attach(part_html)
 
-            self._send_via_smtp(msg, recipient_email)
+            self._send_message(msg, recipient_email)
 
             logger.info(f"Email sent to {recipient_email} - Subject: {subject[:50]}...")
 
+        except SMTPClientError:
+            raise
         except Exception as e:
             logger.error(f"Failed to send email to {recipient_email}: {e}", exc_info=True)
             raise SMTPClientError(
@@ -100,37 +198,38 @@ class SMTPClient:
                 is_transient=self._is_transient_error(e),
             ) from e
 
-    def _send_via_smtp(self, msg: MIMEMultipart, recipient_email: str) -> None:
-        """Send message via SMTP connection."""
-        smtp = None
-        try:
-            logger.debug(f"Connecting to SMTP: {self.config.host}:{self.config.port}")
-            smtp = smtplib.SMTP(
-                self.config.host,
-                self.config.port,
-                timeout=self.config.timeout,
-            )
+    def _send_message(self, msg: MIMEMultipart, recipient_email: str) -> None:
+        """Send message via SMTP connection with retry on stale connection.
 
-            if self.config.use_tls:
-                logger.debug("Starting TLS...")
-                smtp.starttls()
+        Args:
+            msg: Email message to send.
+            recipient_email: Recipient email address.
+        """
+        max_retries = 2
 
-            logger.debug("Authenticating...")
-            smtp.login(self.config.username, self.config.password)
+        for attempt in range(max_retries):
+            try:
+                smtp = self._get_connection()
+                smtp.send_message(
+                    msg,
+                    from_addr=self.config.from_email,
+                    to_addrs=[recipient_email],
+                )
+                return
 
-            logger.debug(f"Sending email to {recipient_email}...")
-            smtp.send_message(
-                msg,
-                from_addr=self.config.from_email,
-                to_addrs=[recipient_email],
-            )
+            except (smtplib.SMTPException, OSError) as e:
+                logger.warning(
+                    f"SMTP send failed (attempt {attempt + 1}/{max_retries}): {e}"
+                )
+                # Close stale connection and retry
+                with self._lock:
+                    self._close_connection()
 
-        finally:
-            if smtp:
-                try:
-                    smtp.quit()
-                except Exception:
-                    pass
+                if attempt == max_retries - 1:
+                    raise SMTPClientError(
+                        f"Failed to send email after {max_retries} attempts: {e}",
+                        is_transient=True,
+                    ) from e
 
     def validate_connection(self) -> bool:
         """Test SMTP connection and authentication.
@@ -138,32 +237,15 @@ class SMTPClient:
         Returns:
             True if connection successful, False otherwise.
         """
-        smtp = None
         try:
             logger.info("Testing SMTP connection...")
-            smtp = smtplib.SMTP(
-                self.config.host,
-                self.config.port,
-                timeout=self.config.timeout,
-            )
-
-            if self.config.use_tls:
-                smtp.starttls()
-
-            smtp.login(self.config.username, self.config.password)
+            self._get_connection()
             logger.info("SMTP connection test successful")
             return True
 
         except Exception as e:
             logger.error(f"SMTP connection test failed: {e}")
             return False
-
-        finally:
-            if smtp:
-                try:
-                    smtp.quit()
-                except Exception:
-                    pass
 
     def send_test_email(self, test_recipient: str) -> bool:
         """Send a test email to verify configuration.
@@ -190,9 +272,22 @@ class SMTPClient:
             logger.error(f"Test email failed: {e}")
             return False
 
+    def close(self) -> None:
+        """Close SMTP connection and cleanup resources."""
+        with self._lock:
+            self._close_connection()
+            logger.debug("SMTP client closed")
+
     @staticmethod
     def _is_transient_error(error: Exception) -> bool:
-        """Determine if error is temporary (retryable)."""
+        """Determine if error is temporary (retryable).
+
+        Args:
+            error: Exception to analyze.
+
+        Returns:
+            True if error is likely transient and retry may succeed.
+        """
         error_str = str(error).lower()
         transient_keywords = [
             "timeout",
@@ -201,5 +296,16 @@ class SMTPClient:
             "try again",
             "unavailable",
             "service",
+            "refused",
+            "reset",
+            "broken pipe",
         ]
         return any(keyword in error_str for keyword in transient_keywords)
+
+    def __enter__(self) -> "SMTPClient":
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit - close connection."""
+        self.close()

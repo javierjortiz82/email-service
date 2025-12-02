@@ -64,7 +64,7 @@ class EmailConfig(BaseSettings):
         description="Name of the service",
     )
     SERVICE_VERSION: str = Field(
-        default="1.0.0",
+        default="2.0.0",
         description="Service version",
     )
     API_HOST: str = Field(
@@ -79,10 +79,30 @@ class EmailConfig(BaseSettings):
     )
 
     # ========================================================================
+    # Security Configuration
+    # ========================================================================
+    API_KEY: str = Field(
+        default="",
+        description="API key for authentication (empty = auth disabled)",
+    )
+    RATE_LIMIT_PER_MINUTE: int = Field(
+        default=60,
+        ge=1,
+        le=1000,
+        description="Maximum requests per minute per client",
+    )
+    RATE_LIMIT_PER_SECOND: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum requests per second per client",
+    )
+
+    # ========================================================================
     # Database Configuration
     # ========================================================================
     DATABASE_URL: str = Field(
-        default="postgresql://mcp_user:mcp_password@localhost:5434/mcpdb",
+        ...,  # Required - no default for security
         description="PostgreSQL connection string",
     )
     SCHEMA_NAME: str = Field(
