@@ -5,7 +5,7 @@
 #
 # Usage:
 #   docker build -t email-service:latest .
-#   docker run -p 8000:8000 --env-file .env email-service:latest
+#   docker run -p 8001:8001 --env-file .env email-service:latest
 
 FROM python:3.11-slim AS base
 
@@ -49,7 +49,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "from email_service.config.settings import EmailConfig; print('healthy')" || exit 1
 
 # Default port (can be overridden by API_PORT env var)
-EXPOSE ${API_PORT:-8000}
+EXPOSE ${API_PORT:-8001}
 
 # Default: run API server (command can be overridden in docker-compose)
 CMD ["python", "-m", "email_service.api.main"]
