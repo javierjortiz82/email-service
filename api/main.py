@@ -323,11 +323,11 @@ async def send_email(
     except Exception as e:
         # Log full error details server-side
         logger.error(f"Failed to queue email: {e}", exc_info=True)
-        # Return sanitized error to client
+        # Return sanitized error to client (intentionally not chaining)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process email request",
-        )
+        ) from None
 
 
 @app.get(
@@ -363,11 +363,11 @@ async def get_queue_status_endpoint(
     except Exception as e:
         # Log full error details server-side
         logger.error(f"Failed to get queue status: {e}", exc_info=True)
-        # Return sanitized error to client
+        # Return sanitized error to client (intentionally not chaining)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve queue status",
-        )
+        ) from None
 
 
 @app.get(
@@ -378,7 +378,7 @@ async def get_queue_status_endpoint(
 async def health_check(
     queue_manager: Annotated[EmailQueueManager, Depends(get_queue_manager)],
     config: Annotated[EmailConfig, Depends(get_config)],
-) -> HealthResponse:
+) -> HealthResponse | JSONResponse:
     """Check service health.
 
     No authentication required - used by load balancers and monitoring.

@@ -9,17 +9,17 @@ Version: 1.0.0
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import psycopg2
 import pytest
 
+from email_service.core.exceptions import EmailQueueError
 from email_service.database.queue import (
     EmailQueueManager,
     _validate_connection,
     with_db_retry,
 )
-from email_service.core.exceptions import EmailQueueError
 from email_service.models.email import EmailStatus, EmailType
 
 
@@ -158,7 +158,7 @@ class TestWithDbRetryDecorator:
                     with conn.cursor() as cur:
                         cur.execute("SELECT 1")
 
-                with pytest.raises(EmailQueueError) as exc_info:
+                with pytest.raises(EmailQueueError):
                     test_func(manager)
 
                 # Should fail immediately without retries

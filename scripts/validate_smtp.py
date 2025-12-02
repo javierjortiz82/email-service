@@ -13,11 +13,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Optional
 
-from email_service.config import EmailConfig
-from email_service.core.logger import setup_logging, get_logger
 from email_service.clients.smtp import SMTPClient
+from email_service.config import EmailConfig
+from email_service.core.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
 
@@ -103,7 +102,7 @@ def send_test_email(test_recipient: str) -> bool:
         return False
 
 
-def print_recommendations(success: bool, test_email_success: Optional[bool] = None) -> None:
+def print_recommendations(success: bool, test_email_success: bool | None = None) -> None:
     """Print recommendations based on test results.
 
     Args:

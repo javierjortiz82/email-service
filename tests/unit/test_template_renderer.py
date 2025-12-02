@@ -11,13 +11,13 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from email_service.templates.renderer import TemplateRenderer
 from email_service.core.exceptions import TemplateRenderError
 from email_service.models.email import EmailType
+from email_service.templates.renderer import TemplateRenderer
 
 
 class TestTemplateRendererInit:
@@ -340,7 +340,7 @@ class TestErrorHandling:
         with open(bad_template, "w") as f:
             f.write("{% if unclosed")
 
-        renderer = TemplateRenderer(template_dir=temp_template_dir)
+        TemplateRenderer(template_dir=temp_template_dir)
 
         # This should not raise during init, but would when trying to render
         # The Jinja2 loader may or may not catch this depending on version

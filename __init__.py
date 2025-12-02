@@ -54,23 +54,41 @@ __version__ = "2.0.0"
 
 # Clients
 from email_service.clients import SMTPClient
+
 # Configuration
 from email_service.config import EmailConfig
+
 # Core utilities
-from email_service.core import (EmailConfigError, EmailQueueError,
-                                EmailServiceError, SMTPClientError,
-                                TemplateRenderError, get_logger)
+from email_service.core import (
+    EmailConfigError,
+    EmailQueueError,
+    EmailServiceError,
+    SMTPClientError,
+    TemplateRenderError,
+    get_logger,
+)
+
 # Database
 from email_service.database import EmailQueueManager
+
 # Models
-from email_service.models import (BookingCancelledContext,
-                                  BookingCreatedContext,
-                                  BookingRescheduledContext,
-                                  EmailCreateRequest, EmailRecord, EmailStats,
-                                  EmailStatus, EmailTemplateContext, EmailType,
-                                  ReminderContext, SMTPConfig)
+from email_service.models import (
+    BookingCancelledContext,
+    BookingCreatedContext,
+    BookingRescheduledContext,
+    EmailCreateRequest,
+    EmailRecord,
+    EmailStats,
+    EmailStatus,
+    EmailTemplateContext,
+    EmailType,
+    ReminderContext,
+    SMTPConfig,
+)
+
 # Templates
 from email_service.templates import TemplateRenderer
+
 # Worker
 from email_service.worker import EmailWorker
 

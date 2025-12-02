@@ -9,7 +9,7 @@ Version: 1.0.0
 from __future__ import annotations
 
 import smtplib
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -91,7 +91,7 @@ class TestSMTPConnection:
             client._connection = dead_conn
             client._last_used = float("inf")  # Not stale by time
 
-            conn = client._get_connection()
+            client._get_connection()
 
             # Should have gotten fresh connection
             assert client._connection == fresh_conn or mock_smtp.call_count >= 1

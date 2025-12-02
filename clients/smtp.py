@@ -302,7 +302,7 @@ class SMTPClient:
         ]
         return any(keyword in error_str for keyword in transient_keywords)
 
-    def __enter__(self) -> "SMTPClient":
+    def __enter__(self) -> SMTPClient:
         """Context manager entry."""
         return self
 

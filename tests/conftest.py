@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Generator
 from datetime import datetime
-from typing import Any, Generator
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -237,8 +238,10 @@ def mock_queue_manager() -> MagicMock:
 def test_client(mock_config: MagicMock, mock_queue_manager: MagicMock):
     """Create a FastAPI test client with mocked dependencies."""
     from contextlib import asynccontextmanager
+
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+
     import email_service.api.main as main_module
     from email_service.api.main import AppState
 

@@ -17,7 +17,7 @@ from typing import Any
 from email_service.clients.smtp import SMTPClient
 from email_service.config import EmailConfig
 from email_service.core.exceptions import EmailServiceError
-from email_service.core.logger import get_logger, setup_logging, log_context
+from email_service.core.logger import get_logger, log_context, setup_logging
 from email_service.database.queue import EmailQueueManager
 from email_service.models.email import EmailRecord, EmailStatus, EmailType
 from email_service.templates.renderer import TemplateRenderer
@@ -205,6 +205,9 @@ class EmailWorker:
 
     def _prepare_email_content(self, email: EmailRecord) -> tuple[str, str | None]:
         """Prepare email content (render if needed or use pre-rendered)."""
+        body_html: str
+        body_text: str | None
+
         if email.template_context:
             logger.debug(f"Rendering template for email type: {email.type}")
 

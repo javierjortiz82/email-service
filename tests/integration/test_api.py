@@ -8,10 +8,7 @@ Version: 1.0.0
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
 import pytest
-from fastapi.testclient import TestClient
 
 
 class TestHealthEndpoint:

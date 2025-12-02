@@ -15,9 +15,10 @@ Version: 2.1.0
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import datetime
 from functools import wraps
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 import psycopg2
 from psycopg2 import pool
@@ -58,7 +59,7 @@ def with_db_retry(
 
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
-        def wrapper(self: "EmailQueueManager", *args: Any, **kwargs: Any) -> T:
+        def wrapper(self: EmailQueueManager, *args: Any, **kwargs: Any) -> T:
             last_error: Exception | None = None
 
             for attempt in range(max_retries):
@@ -253,7 +254,8 @@ class EmailQueueManager:
                             priority,
                         ),
                     )
-                    email_id = cur.fetchone()["enqueue_email"]
+                    result = cur.fetchone()
+                    email_id: int = result["enqueue_email"] if result else 0
                     conn.commit()
 
                     logger.info(f"Email #{email_id} enqueued successfully")
@@ -516,7 +518,8 @@ class EmailQueueManager:
                         f"SELECT {self.config.SCHEMA_NAME}.cleanup_old_emails(%s)",
                         (days_to_keep,),
                     )
-                    deleted_count = cur.fetchone()["cleanup_old_emails"]
+                    result = cur.fetchone()
+                    deleted_count: int = result["cleanup_old_emails"] if result else 0
                     conn.commit()
 
                     logger.info(f"Deleted {deleted_count} old emails")

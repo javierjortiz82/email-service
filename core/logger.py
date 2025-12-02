@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from email_service.config.settings import EmailConfig
 
 # Global configuration
-_ROOT_LOGGER: Optional[logging.Logger] = None
+_ROOT_LOGGER: logging.Logger | None = None
 _LOG_DIR = Path(__file__).parent.parent / "logs"
 _LOG_FORMAT_DETAILED = (
     "%(asctime)s | %(levelname)-8s | %(name)s | %(funcName)s:%(lineno)d | %(message)s"
@@ -247,7 +247,7 @@ def print_config_summary(settings: "EmailConfig") -> None:
 
 
 def setup_logging(
-    log_dir: Optional[Path] = None,
+    log_dir: Path | None = None,
     log_level: str = "INFO",
     file_level: str = "DEBUG",
     console_level: str = "INFO",
@@ -347,7 +347,7 @@ def setup_logging(
         print_config_summary(settings)
 
 
-def get_logger(name: str, log_level: Optional[str] = None) -> logging.Logger:
+def get_logger(name: str, log_level: str | None = None) -> logging.Logger:
     """Get a configured logger instance for a module.
 
     Gets or creates a logger with consistent formatting. Call setup_logging()
@@ -394,8 +394,8 @@ def get_logs_directory() -> Path:
 def log_context(
     logger: logging.Logger,
     operation: str,
-    email_id: Optional[int] = None,
-    recipient: Optional[str] = None,
+    email_id: int | None = None,
+    recipient: str | None = None,
     **kwargs,
 ) -> str:
     """Format a log context string with metadata.

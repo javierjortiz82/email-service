@@ -101,6 +101,16 @@ skip_glob = ["*/migrations/*"]
 [tool.ruff]
 line-length = 88
 target-version = "py311"
+exclude = [
+    ".git",
+    ".venv",
+    "build",
+    "dist",
+    ".eggs",
+    "*.egg-info",
+]
+
+[tool.ruff.lint]
 select = [
     "E",     # pycodestyle errors
     "W",     # pycodestyle warnings
@@ -114,21 +124,17 @@ ignore = [
     "E501",  # line too long
     "W505",  # line too long
 ]
-exclude = [
-    ".git",
-    ".venv",
-    "build",
-    "dist",
-    ".eggs",
-    "*.egg-info",
-]
 
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
-plugins = ["pydantic.mypy"]
+mypy_path = "."
+namespace_packages = true
+explicit_package_bases = true
+# Disable call-arg for Pydantic settings that load from env vars
+disable_error_code = ["call-arg"]
 
 [[tool.mypy.overrides]]
 module = ["psycopg2.*", "jinja2.*"]

@@ -78,8 +78,8 @@ def main() -> int:
         print("❌ .env file is missing required variables:")
         for var in sorted(missing_vars):
             print(f"   - {var}")
-        print(f"\n📝 Please copy .env.example to .env and fill in the values")
-        print(f"   cp email_service/.env.example .env")
+        print("\n📝 Please copy .env.example to .env and fill in the values")
+        print("   cp email_service/.env.example .env")
         return 1
 
 

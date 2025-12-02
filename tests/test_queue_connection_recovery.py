@@ -8,8 +8,9 @@ Features tested:
 - Automatic dead connection detection and replacement
 """
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from psycopg2 import OperationalError
 
 
