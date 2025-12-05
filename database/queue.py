@@ -15,8 +15,9 @@ Version: 2.1.0
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, TypeVar
 
@@ -115,6 +116,9 @@ class EmailQueueManager:
     Thread-safe for multi-worker deployments.
     """
 
+    # M003 fix: Valid schema name pattern (alphanumeric and underscore only)
+    _VALID_SCHEMA_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
     def __init__(self, config: EmailConfig | None = None) -> None:
         """Initialize queue manager with connection pool.
 
@@ -126,6 +130,14 @@ class EmailQueueManager:
         """
         self.config = config or EmailConfig()
         self._pool: pool.SimpleConnectionPool | None = None
+
+        # M003 fix: Validate SCHEMA_NAME to prevent SQL injection
+        if not self._VALID_SCHEMA_PATTERN.match(self.config.SCHEMA_NAME):
+            raise EmailQueueError(
+                f"Invalid SCHEMA_NAME: '{self.config.SCHEMA_NAME}'. "
+                f"Schema names must start with a letter or underscore and contain only "
+                f"alphanumeric characters and underscores."
+            )
 
         try:
             self._init_pool()

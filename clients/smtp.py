@@ -142,8 +142,9 @@ class SMTPClient:
         if self._connection:
             try:
                 self._connection.quit()
-            except Exception:
-                pass
+            except Exception as e:
+                # P005 fix: Log connection close errors for debugging
+                logger.debug(f"Error closing SMTP connection (non-critical): {e}")
             finally:
                 self._connection = None
                 self._last_used = 0

@@ -210,11 +210,18 @@ class EmailWorker:
         if email.template_context:
             logger.debug(f"Rendering template for email type: {email.type}")
 
+            # M002 fix: Safely convert email.type to EmailType enum
+            try:
+                email_type = EmailType(email.type) if isinstance(email.type, str) else email.type
+            except ValueError:
+                logger.warning(f"Unknown email type '{email.type}', defaulting to TRANSACTIONAL")
+                email_type = EmailType.TRANSACTIONAL
+
             body_html = self.template_renderer.render_html(
-                EmailType(email.type), email.template_context
+                email_type, email.template_context
             )
             body_text = self.template_renderer.render_text(
-                EmailType(email.type), email.template_context
+                email_type, email.template_context
             )
 
             logger.debug(f"Template rendered - HTML: {len(body_html)} bytes")

@@ -65,7 +65,8 @@ class EmailResponse(BaseModel):
     queued: bool = Field(description="Whether email was queued")
     message_id: str = Field(description="Internal message ID")
     detail: str = Field(description="Status message")
-    timestamp: datetime = Field(default_factory=datetime.now)
+    # P003 fix: Use lambda to capture timestamp at instantiation time
+    timestamp: datetime = Field(default_factory=lambda: datetime.now())
 
 
 class QueueStatusResponse(BaseModel):
@@ -76,7 +77,8 @@ class QueueStatusResponse(BaseModel):
     processing: int = Field(description="Emails currently being sent")
     sent: int = Field(description="Successfully sent emails")
     failed: int = Field(description="Permanently failed emails")
-    timestamp: datetime = Field(default_factory=datetime.now)
+    # P003 fix: Use lambda to capture timestamp at instantiation time
+    timestamp: datetime = Field(default_factory=lambda: datetime.now())
 
 
 class HealthResponse(BaseModel):
@@ -86,7 +88,8 @@ class HealthResponse(BaseModel):
     db: str = Field(description="Database connection status")
     email_provider: str = Field(description="SMTP connection status")
     version: str = Field(description="Service version")
-    timestamp: datetime = Field(default_factory=datetime.now)
+    # P003 fix: Use lambda to capture timestamp at instantiation time
+    timestamp: datetime = Field(default_factory=lambda: datetime.now())
 
 
 class ErrorResponse(BaseModel):
@@ -95,4 +98,5 @@ class ErrorResponse(BaseModel):
     error: str = Field(description="Error type")
     message: str = Field(description="Error description")
     code: str = Field(description="Error code")
-    timestamp: datetime = Field(default_factory=datetime.now)
+    # P003 fix: Use lambda to capture timestamp at instantiation time
+    timestamp: datetime = Field(default_factory=lambda: datetime.now())

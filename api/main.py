@@ -17,6 +17,7 @@ Version: 2.0.0
 from __future__ import annotations
 
 import hashlib
+import secrets
 import threading
 import time
 import uuid
@@ -86,7 +87,8 @@ class RateLimiter:
 
     requests_per_minute: int = 60
     requests_per_second: int = 10
-    _requests: dict = field(default_factory=lambda: defaultdict(list))
+    # M004 fix: Proper type hint for _requests dict
+    _requests: dict[str, list[float]] = field(default_factory=lambda: defaultdict(list))
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def _clean_old_requests(self, client_id: str, window_seconds: int) -> None:
@@ -167,7 +169,8 @@ async def verify_api_key(
             headers={"WWW-Authenticate": "ApiKey"},
         )
 
-    if api_key != configured_key:
+    # M001 fix: Use timing-safe comparison to prevent timing attacks
+    if not secrets.compare_digest(api_key, configured_key):
         logger.warning("Invalid API key attempt")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -433,12 +436,12 @@ def run():
     """Run the API server."""
     import uvicorn
 
-    cfg = EmailConfig()
-    logger.info(f"Starting {cfg.SERVICE_NAME} on {cfg.API_HOST}:{cfg.API_PORT}")
+    # P001 fix: Use module-level _config instead of creating new instance
+    logger.info(f"Starting {_config.SERVICE_NAME} on {_config.API_HOST}:{_config.API_PORT}")
     uvicorn.run(
         "email_service.api.main:app",
-        host=cfg.API_HOST,
-        port=cfg.API_PORT,
+        host=_config.API_HOST,
+        port=_config.API_PORT,
         reload=False,
     )
 

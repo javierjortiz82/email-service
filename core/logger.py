@@ -21,6 +21,7 @@ import logging
 import logging.handlers
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -45,8 +46,9 @@ _MODULE_LEVELS = {
     "email_service.config": logging.INFO,
 }
 
+# P006 fix: Use tempfile for cross-platform compatibility
 # Flag file to track if banner was already printed (for multi-worker scenarios)
-_BANNER_FLAG_FILE = "/tmp/.email_service_banner_printed"
+_BANNER_FLAG_FILE = os.path.join(tempfile.gettempdir(), ".email_service_banner_printed")
 _BANNER_FLAG_PATH = Path(_BANNER_FLAG_FILE)
 
 # Module-level flag to track if this process printed the banner

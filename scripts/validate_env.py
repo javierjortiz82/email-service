@@ -66,8 +66,15 @@ def main() -> int:
     # Load .env file if it exists
     env_file = Path.cwd() / ".env"
     if env_file.exists():
-        import dotenv
-        dotenv.load_dotenv(env_file)
+        # P004 fix: Handle ImportError gracefully
+        try:
+            import dotenv
+            dotenv.load_dotenv(env_file)
+        except ImportError:
+            print("Warning: python-dotenv not installed. Install with: pip install python-dotenv")
+            print("Continuing with existing environment variables...")
+        except Exception as e:
+            print(f"Warning: Failed to load .env file: {e}")
 
     is_valid, missing_vars = validate_env()
 
