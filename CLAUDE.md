@@ -7,4 +7,6 @@
 - Schema: test.email_queue with all functions (init.sql executed)
 - orchestrator-sa has run.invoker role for service-to-service calls
 - shared-libs/internal_service_client.py updated with call_email_service method
-- Deploy: gcloud builds submit --config=cloudbuild.yaml --substitutions=SHORT_SHA=$(git rev-parse --short HEAD)
+- Cloud Scheduler: email-queue-processor runs every minute to process queue
+- Deploy: gcloud builds submit --config=cloudbuild.yaml --substitutions=SHORT_SHA=xxx
+- Endpoints: POST /emails, GET /queue/status, POST /queue/process, GET /health
