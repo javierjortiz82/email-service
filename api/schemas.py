@@ -92,6 +92,16 @@ class HealthResponse(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now())
 
 
+class ProcessQueueResponse(BaseModel):
+    """Response model for POST /queue/process endpoint."""
+
+    processed: int = Field(description="Number of emails successfully sent")
+    failed: int = Field(description="Number of emails that failed")
+    retried: int = Field(description="Number of emails scheduled for retry")
+    detail: str = Field(description="Processing summary")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now())
+
+
 class ErrorResponse(BaseModel):
     """Standard error response model."""
 

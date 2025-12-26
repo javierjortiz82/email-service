@@ -92,7 +92,7 @@ class EmailRecord(BaseModel):
     """
 
     id: int = Field(..., description="Unique email record ID")
-    type: EmailType = Field(..., description="Email type/category")
+    type: EmailType = Field(..., alias="email_type", description="Email type/category")
     recipient_email: str = Field(..., description="Recipient email address")
     recipient_name: str | None = Field(default=None, description="Recipient full name")
     subject: str = Field(..., max_length=500, description="Email subject line")
@@ -130,5 +130,6 @@ class EmailRecord(BaseModel):
 
     model_config = {
         "from_attributes": True,  # Pydantic v2
+        "populate_by_name": True,  # Allow both field name and alias
         "use_enum_values": False,
     }

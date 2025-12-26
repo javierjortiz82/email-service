@@ -24,6 +24,7 @@ import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Annotated
 
 from email_service.api.schemas import (
@@ -31,12 +32,15 @@ from email_service.api.schemas import (
     EmailResponse,
     ErrorResponse,
     HealthResponse,
+    ProcessQueueResponse,
     QueueStatusResponse,
 )
+from email_service.clients.smtp import SMTPClient
 from email_service.config import EmailConfig
 from email_service.core.logger import get_logger, setup_logging
 from email_service.database.queue import EmailQueueManager
-from email_service.models.email import EmailStatus, EmailType
+from email_service.models.email import EmailRecord, EmailStatus, EmailType
+from email_service.templates.renderer import TemplateRenderer
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
@@ -387,6 +391,143 @@ async def get_queue_status_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve queue status",
         ) from None
+
+
+@app.post(
+    "/queue/process",
+    response_model=ProcessQueueResponse,
+    responses={500: {"model": ErrorResponse, "description": "Processing failed"}},
+)
+async def process_queue_endpoint(
+    queue_manager: Annotated[EmailQueueManager, Depends(get_queue_manager)],
+    config: Annotated[EmailConfig, Depends(get_config)],
+    _auth: Annotated[bool, Depends(verify_api_key)],
+    batch_size: int = 10,
+) -> ProcessQueueResponse:
+    """Process pending emails in the queue.
+
+    This endpoint is designed for Cloud Run where background workers
+    are not available. Call this endpoint via Cloud Scheduler to
+    process the email queue periodically.
+
+    Args:
+        batch_size: Maximum emails to process (default: 10, max: 50)
+
+    Requires API key or IAM authentication.
+    """
+    batch_size = min(max(batch_size, 1), 50)
+    processed = 0
+    failed = 0
+    retried = 0
+
+    try:
+        # Validate SMTP config before processing
+        config.validate_smtp_config()
+
+        # Initialize SMTP client and template renderer
+        smtp_client = SMTPClient()
+        template_renderer = TemplateRenderer()
+
+        # Get pending emails
+        pending_emails = queue_manager.get_pending_emails(limit=batch_size)
+
+        if not pending_emails:
+            return ProcessQueueResponse(
+                processed=0,
+                failed=0,
+                retried=0,
+                detail="No pending emails in queue",
+            )
+
+        logger.info(f"Processing {len(pending_emails)} pending emails...")
+
+        for email in pending_emails:
+            try:
+                # Prepare email content
+                body_html, body_text = _prepare_email_content(
+                    email, template_renderer, config
+                )
+
+                # Send via SMTP
+                smtp_client.send_email(
+                    recipient_email=email.recipient_email,
+                    recipient_name=email.recipient_name,
+                    subject=email.subject,
+                    body_html=body_html,
+                    body_text=body_text,
+                )
+
+                # Mark as sent
+                queue_manager.update_email_status(
+                    email.id, EmailStatus.SENT, sent_at=datetime.now()
+                )
+                processed += 1
+                logger.info(f"Email {email.id} sent successfully")
+
+            except Exception as e:
+                error_msg = str(e)[:500]
+                logger.error(f"Failed to send email {email.id}: {error_msg}")
+
+                # Retry logic
+                if email.retry_count < email.max_retries:
+                    queue_manager.retry_email(
+                        email.id,
+                        error=error_msg,
+                        backoff_seconds=config.EMAIL_RETRY_BACKOFF_SECONDS,
+                    )
+                    retried += 1
+                else:
+                    queue_manager.update_email_status(
+                        email.id, EmailStatus.FAILED, error=error_msg
+                    )
+                    failed += 1
+
+        # Cleanup SMTP connection
+        smtp_client.close()
+
+        detail = (
+            f"Processed batch: {processed} sent, {retried} retried, {failed} failed"
+        )
+        logger.info(detail)
+
+        return ProcessQueueResponse(
+            processed=processed,
+            failed=failed,
+            retried=retried,
+            detail=detail,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Queue processing error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process email queue",
+        ) from None
+
+
+def _prepare_email_content(
+    email: EmailRecord,
+    template_renderer: TemplateRenderer,
+    config: EmailConfig,
+) -> tuple[str, str | None]:
+    """Prepare email content (render template or use pre-rendered)."""
+    if email.template_context:
+        try:
+            email_type = (
+                EmailType(email.type) if isinstance(email.type, str) else email.type
+            )
+        except ValueError:
+            email_type = EmailType.TRANSACTIONAL
+
+        body_html = template_renderer.render_html(email_type, email.template_context)
+        body_text = template_renderer.render_text(email_type, email.template_context)
+    else:
+        body_html = email.body_html
+        body_text = email.body_text
+
+    return body_html, body_text
 
 
 @app.get(
