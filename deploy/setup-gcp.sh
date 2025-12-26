@@ -323,9 +323,31 @@ gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
 log_success "Cloud Build permissions configured"
 
 # =============================================================================
-# STEP 7: Configure Docker
+# STEP 7: Enable Cloud Scheduler API
 # =============================================================================
-log_step "Step 7/7: Docker Configuration"
+log_step "Step 7/8: Cloud Scheduler API"
+
+if gcloud services list --enabled --filter="name:cloudscheduler.googleapis.com" --format="value(name)" | grep -q "cloudscheduler"; then
+    log_success "Cloud Scheduler API already enabled"
+else
+    log_info "Enabling Cloud Scheduler API..."
+    gcloud services enable cloudscheduler.googleapis.com --quiet
+    log_success "Cloud Scheduler API enabled"
+fi
+
+log_info "Note: After deployment, create the scheduler job with:"
+echo "  gcloud scheduler jobs create http email-queue-processor \\"
+echo "    --location=${REGION} \\"
+echo "    --schedule='* * * * *' \\"
+echo "    --uri='https://email-service-XXXXX.us-central1.run.app/queue/process' \\"
+echo "    --http-method=POST \\"
+echo "    --oidc-service-account-email=${ORCHESTRATOR_SA} \\"
+echo "    --oidc-token-audience='https://email-service-XXXXX.us-central1.run.app'"
+
+# =============================================================================
+# STEP 8: Configure Docker
+# =============================================================================
+log_step "Step 8/8: Docker Configuration"
 
 gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 log_success "Docker configured for Artifact Registry"

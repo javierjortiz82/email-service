@@ -82,15 +82,42 @@ chmod +x deploy/deploy-manual.sh
 ./deploy/deploy-manual.sh
 ```
 
-### 4. Grant Orchestrator Access
+### 4. Post-Deployment Setup
 
-After deployment, allow the orchestrator service account to invoke email-service:
+After deployment, run the post-deploy script to:
+- Initialize database schema (if new deployment)
+- Grant access to orchestrator-sa and demo-service-sa
+- Create Cloud Scheduler job for queue processing
 
 ```bash
+chmod +x deploy/post-deploy.sh
+./deploy/post-deploy.sh
+```
+
+Or manually:
+
+```bash
+# Grant orchestrator access
 gcloud run services add-iam-policy-binding email-service \
   --region=us-central1 \
   --member='serviceAccount:orchestrator-sa@gen-lang-client-0329024102.iam.gserviceaccount.com' \
   --role='roles/run.invoker'
+
+# Grant demo-service access
+gcloud run services add-iam-policy-binding email-service \
+  --region=us-central1 \
+  --member='serviceAccount:demo-service-sa@gen-lang-client-0329024102.iam.gserviceaccount.com' \
+  --role='roles/run.invoker'
+
+# Create Cloud Scheduler job
+SERVICE_URL=$(gcloud run services describe email-service --region=us-central1 --format='value(status.url)')
+gcloud scheduler jobs create http email-queue-processor \
+  --location=us-central1 \
+  --schedule="* * * * *" \
+  --uri="${SERVICE_URL}/queue/process" \
+  --http-method=POST \
+  --oidc-service-account-email=orchestrator-sa@gen-lang-client-0329024102.iam.gserviceaccount.com \
+  --oidc-token-audience="${SERVICE_URL}"
 ```
 
 ## Security Configuration
