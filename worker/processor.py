@@ -73,7 +73,7 @@ class EmailWorker:
             self.running = True
             self.processed_count = 0
             self.failed_count = 0  # Permanent failures only
-            self.retry_count = 0   # D013 fix: Track retries separately
+            self.retry_count = 0  # D013 fix: Track retries separately
 
             # Concurrency control - limit parallel email sends
             self._concurrency = getattr(self.config, "EMAIL_WORKER_CONCURRENCY", 5)
@@ -112,7 +112,10 @@ class EmailWorker:
             try:
                 await self._process_batch()
             except Exception:
-                logger.error(f"Cycle #{cycle_count}: Unexpected error in worker loop", exc_info=True)
+                logger.error(
+                    f"Cycle #{cycle_count}: Unexpected error in worker loop",
+                    exc_info=True,
+                )
 
             await asyncio.sleep(self.config.EMAIL_WORKER_POLL_INTERVAL)
 
@@ -143,8 +146,7 @@ class EmailWorker:
 
             # Process emails concurrently with semaphore-limited parallelism
             tasks = [
-                self._process_email_with_semaphore(email)
-                for email in pending_emails
+                self._process_email_with_semaphore(email) for email in pending_emails
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -212,9 +214,13 @@ class EmailWorker:
 
             # M002 fix: Safely convert email.type to EmailType enum
             try:
-                email_type = EmailType(email.type) if isinstance(email.type, str) else email.type
+                email_type = (
+                    EmailType(email.type) if isinstance(email.type, str) else email.type
+                )
             except ValueError:
-                logger.warning(f"Unknown email type '{email.type}', defaulting to TRANSACTIONAL")
+                logger.warning(
+                    f"Unknown email type '{email.type}', defaulting to TRANSACTIONAL"
+                )
                 email_type = EmailType.TRANSACTIONAL
 
             body_html = self.template_renderer.render_html(
@@ -226,7 +232,9 @@ class EmailWorker:
 
             logger.debug(f"Template rendered - HTML: {len(body_html)} bytes")
         else:
-            logger.debug(f"Using pre-rendered content - HTML: {len(email.body_html)} bytes")
+            logger.debug(
+                f"Using pre-rendered content - HTML: {len(email.body_html)} bytes"
+            )
 
             body_html = email.body_html
             body_text = email.body_text
@@ -276,7 +284,9 @@ class EmailWorker:
         # D013 fix: More accurate statistics
         total_attempts = self.processed_count + self.failed_count + self.retry_count
         total_emails = self.processed_count + self.failed_count
-        success_rate = (self.processed_count / total_emails * 100) if total_emails > 0 else 0
+        success_rate = (
+            (self.processed_count / total_emails * 100) if total_emails > 0 else 0
+        )
 
         logger.info("Email Worker Statistics:")
         logger.info(f"   Total attempts: {total_attempts}")

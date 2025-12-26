@@ -1,1 +1,10 @@
 - Revision de defectos
+- DEPLOYED TO PRODUCTION: Google Cloud Run deployment SUCCESSFUL (2025-12-26)
+- Service URL: https://email-service-69054835734.us-central1.run.app
+- IAM + Service Account authentication (email-service-sa)
+- Secret Manager: DATABASE_URL, SMTP_USER, SMTP_PASSWORD
+- Cloud SQL: gen-lang-client-0329024102:us-central1:demo-db (database: demodb, user: demo_user)
+- Schema: test.email_queue with all functions (init.sql executed)
+- orchestrator-sa has run.invoker role for service-to-service calls
+- shared-libs/internal_service_client.py updated with call_email_service method
+- Deploy: gcloud builds submit --config=cloudbuild.yaml --substitutions=SHORT_SHA=$(git rev-parse --short HEAD)

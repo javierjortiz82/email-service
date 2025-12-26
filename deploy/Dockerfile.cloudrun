@@ -1,0 +1,116 @@
+# =============================================================================
+# Dockerfile for Cloud Run Deployment - Email Service
+# =============================================================================
+# Multi-stage build optimized for Google Cloud Run.
+#
+# Best Practices Applied:
+#   - Multi-stage build for minimal image size
+#   - UV package manager for fast dependency installation
+#   - Non-root user for security
+#   - Pinned base image versions
+#   - Health check endpoint
+#   - Proper signal handling with tini
+#   - Cloud SQL socket support
+#
+# Build: docker build -f deploy/Dockerfile.cloudrun -t email-service .
+# Test:  docker run -p 8080:8080 -e PORT=8080 -e DATABASE_URL=... email-service
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Builder
+# -----------------------------------------------------------------------------
+FROM python:3.11-slim-bookworm AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install UV (ultrafast package manager)
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Copy requirements and install dependencies
+COPY requirements.txt .
+RUN uv pip install --system --no-cache -r requirements.txt
+
+# -----------------------------------------------------------------------------
+# Stage 2: Runtime
+# -----------------------------------------------------------------------------
+FROM python:3.11-slim-bookworm
+
+# Metadata
+LABEL maintainer="NexusIntelligent <dev@nexusintelligent.ai>" \
+      org.opencontainers.image.source="https://github.com/javierjortiz82/email-service" \
+      org.opencontainers.image.description="Email Service - Production Email Microservice with Queue Management" \
+      org.opencontainers.image.version="2.0.0"
+
+WORKDIR /app
+
+# Install runtime dependencies only
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        ca-certificates \
+        tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean \
+    && rm -rf /var/cache/apt/archives/*
+
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Create non-root user
+RUN groupadd -r -g 1000 appgroup \
+    && useradd -r -u 1000 -g appgroup -s /sbin/nologin appuser \
+    && mkdir -p /app/logs /app/email_service \
+    && chown -R appuser:appgroup /app
+
+# Copy application code
+COPY --chown=appuser:appgroup api /app/email_service/api
+COPY --chown=appuser:appgroup clients /app/email_service/clients
+COPY --chown=appuser:appgroup config /app/email_service/config
+COPY --chown=appuser:appgroup core /app/email_service/core
+COPY --chown=appuser:appgroup database /app/email_service/database
+COPY --chown=appuser:appgroup models /app/email_service/models
+COPY --chown=appuser:appgroup templates /app/email_service/templates
+COPY --chown=appuser:appgroup worker /app/email_service/worker
+
+# Create __init__.py for the package
+RUN printf '%s\n' '"""Email Service Package."""' > /app/email_service/__init__.py \
+    && chown appuser:appgroup /app/email_service/__init__.py
+
+# Environment variables
+ENV PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONFAULTHANDLER=1 \
+    PORT=8080 \
+    API_PORT=8080 \
+    GUNICORN_WORKERS=1 \
+    GUNICORN_THREADS=4 \
+    GUNICORN_TIMEOUT=120
+
+# Switch to non-root user
+USER appuser
+
+# Expose port (documentation)
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=15s \
+    CMD curl -sf http://localhost:${PORT}/health || exit 1
+
+# Use tini as init system for proper signal handling
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# Run with gunicorn (Cloud Run handles scaling)
+CMD ["sh", "-c", "exec gunicorn email_service.api.main:app --bind 0.0.0.0:${PORT} --workers ${GUNICORN_WORKERS} --threads ${GUNICORN_THREADS} --worker-class uvicorn.workers.UvicornWorker --timeout ${GUNICORN_TIMEOUT} --keep-alive 30 --max-requests 1000 --max-requests-jitter 100 --graceful-timeout 30 --access-logfile - --error-logfile - --capture-output --enable-stdio-inheritance"]

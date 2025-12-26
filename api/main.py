@@ -111,7 +111,9 @@ class RateLimiter:
             self._clean_old_requests(client_id, 60)
 
             # Check per-second limit (last 1 second)
-            recent_second = [t for t in self._requests.get(client_id, []) if now - t < 1]
+            recent_second = [
+                t for t in self._requests.get(client_id, []) if now - t < 1
+            ]
             if len(recent_second) >= self.requests_per_second:
                 return False
 
@@ -131,7 +133,11 @@ class RateLimiter:
             client_ip = forwarded.split(",")[0].strip()
         else:
             # D012 fix: Safe attribute access
-            client_ip = getattr(request.client, "host", "unknown") if request.client else "unknown"
+            client_ip = (
+                getattr(request.client, "host", "unknown")
+                if request.client
+                else "unknown"
+            )
 
         # Hash the IP for privacy
         return hashlib.sha256(client_ip.encode()).hexdigest()[:16]
@@ -437,7 +443,9 @@ def run():
     import uvicorn
 
     # P001 fix: Use module-level _config instead of creating new instance
-    logger.info(f"Starting {_config.SERVICE_NAME} on {_config.API_HOST}:{_config.API_PORT}")
+    logger.info(
+        f"Starting {_config.SERVICE_NAME} on {_config.API_HOST}:{_config.API_PORT}"
+    )
     uvicorn.run(
         "email_service.api.main:app",
         host=_config.API_HOST,

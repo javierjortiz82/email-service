@@ -930,6 +930,102 @@ exit 1
 
 ---
 
+## Google Cloud Run Deployment
+
+### Architecture
+
+```
+                                    +------------------+
+                                    |   orchestrator   |
+                                    |   (Cloud Run)    |
+                                    +--------+---------+
+                                             |
+                                    IAM Token (Identity)
+                                             v
++------------------+              +------------------+              +------------------+
+|  Secret Manager  |<------------|  email-service   |------------->|    Cloud SQL     |
+|                  |   Secrets   |   (Cloud Run)    |  Unix Socket |   (PostgreSQL)   |
++------------------+              +------------------+              +------------------+
+```
+
+### Quick Start
+
+```bash
+# 1. Initial setup (one-time)
+chmod +x deploy/setup-gcp.sh
+./deploy/setup-gcp.sh
+
+# 2. Configure secrets
+echo 'postgresql://user:pass@/dbname?host=/cloudsql/INSTANCE' | \
+  gcloud secrets versions add email-service-db-url --data-file=-
+
+echo 'your-email@gmail.com' | \
+  gcloud secrets versions add email-smtp-user --data-file=-
+
+echo 'your-app-password' | \
+  gcloud secrets versions add email-smtp-password --data-file=-
+
+# 3. Deploy
+gcloud builds submit --config=cloudbuild.yaml
+
+# 4. Grant orchestrator access (after deployment)
+gcloud run services add-iam-policy-binding email-service \
+  --region=us-central1 \
+  --member='serviceAccount:orchestrator-sa@PROJECT_ID.iam.gserviceaccount.com' \
+  --role='roles/run.invoker'
+```
+
+### Security Features
+
+| Feature | Implementation |
+|---------|---------------|
+| **Authentication** | IAM (--no-allow-unauthenticated) |
+| **Service Account** | `email-service-sa` with least privilege |
+| **Secrets** | Secret Manager (DATABASE_URL, SMTP credentials) |
+| **Database** | Cloud SQL via Unix socket |
+| **Service-to-Service** | orchestrator-sa has run.invoker role |
+
+### Test Production Endpoint
+
+```bash
+# Get identity token
+TOKEN=$(gcloud auth print-identity-token)
+
+# Health check
+curl -H "Authorization: Bearer $TOKEN" \
+  https://email-service-XXXXX.us-central1.run.app/health
+
+# Send email
+curl -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  https://email-service-XXXXX.us-central1.run.app/emails \
+  -d '{"to": ["test@example.com"], "subject": "Test", "body": "<h1>Hello</h1>"}'
+```
+
+### Service-to-Service Calls
+
+Using `internal_service_client.py` from `shared-libs`:
+
+```python
+from internal_service_client import InternalServiceClient
+
+client = InternalServiceClient()
+
+# Send email via internal service
+result = await client.call_email_service(
+    to=["user@example.com"],
+    subject="Welcome!",
+    body="<h1>Hello</h1>",
+    template_id="otp_verification",  # optional
+    template_vars={"otp_code": "123456"}  # optional
+)
+```
+
+For detailed deployment instructions, see [deploy/DEPLOYMENT_GUIDE.md](deploy/DEPLOYMENT_GUIDE.md).
+
+---
+
 ## Contributing
 
 1. Fork the repository

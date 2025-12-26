@@ -67,7 +67,7 @@ class EmailConfig(BaseSettings):
         description="Service version",
     )
     API_HOST: str = Field(
-        default="0.0.0.0",
+        default="0.0.0.0",  # nosec B104 - Required for Docker/Cloud Run
         description="API server host",
     )
     API_PORT: int = Field(

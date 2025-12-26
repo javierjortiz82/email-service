@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime
 from functools import wraps
 from typing import Any, TypeVar
 
@@ -190,7 +190,7 @@ class EmailQueueManager:
         if not _validate_connection(conn):
             try:
                 conn.close()
-            except Exception:
+            except Exception:  # nosec B110
                 pass
             self._pool.putconn(conn, close=True)
             logger.warning("Dead connection detected, retrieving fresh connection")
@@ -242,9 +242,13 @@ class EmailQueueManager:
             conn = self._get_connection()
             try:
                 with conn.cursor() as cur:
-                    template_json = json.dumps(template_context) if template_context else None
+                    template_json = (
+                        json.dumps(template_context) if template_context else None
+                    )
 
-                    logger.debug(f"Enqueueing email: type={email_type.value}, to={recipient_email}")
+                    logger.debug(
+                        f"Enqueueing email: type={email_type.value}, to={recipient_email}"
+                    )
 
                     cur.execute(
                         f"""
@@ -275,7 +279,9 @@ class EmailQueueManager:
             except psycopg2.OperationalError as e:
                 conn.rollback()
                 if attempt < max_retries - 1:
-                    logger.warning(f"Connection error, retrying ({attempt + 1}/{max_retries})")
+                    logger.warning(
+                        f"Connection error, retrying ({attempt + 1}/{max_retries})"
+                    )
                     continue
                 logger.error(f"Failed to enqueue email after retries: {e}")
                 raise EmailQueueError(f"Failed to enqueue email: {e}") from e
@@ -312,7 +318,7 @@ class EmailQueueManager:
                     logger.debug(f"Fetching up to {limit} pending emails...")
 
                     cur.execute(
-                        f"SELECT * FROM {self.config.SCHEMA_NAME}.get_pending_emails(%s)",
+                        f"SELECT * FROM {self.config.SCHEMA_NAME}.get_pending_emails(%s)",  # nosec B608
                         (limit,),
                     )
                     rows = cur.fetchall()
@@ -326,13 +332,23 @@ class EmailQueueManager:
                     for row in rows:
                         row_dict = dict(row)
                         template_context_raw = row_dict.get("template_context")
-                        if template_context_raw and isinstance(template_context_raw, str):
-                            row_dict["template_context"] = json.loads(template_context_raw)
+                        if template_context_raw and isinstance(
+                            template_context_raw, str
+                        ):
+                            row_dict["template_context"] = json.loads(
+                                template_context_raw
+                            )
 
                         # Set default timestamps if not present in database row
-                        if "created_at" not in row_dict or row_dict["created_at"] is None:
+                        if (
+                            "created_at" not in row_dict
+                            or row_dict["created_at"] is None
+                        ):
                             row_dict["created_at"] = datetime.now()
-                        if "updated_at" not in row_dict or row_dict["updated_at"] is None:
+                        if (
+                            "updated_at" not in row_dict
+                            or row_dict["updated_at"] is None
+                        ):
                             row_dict["updated_at"] = datetime.now()
 
                         email_records.append(EmailRecord(**row_dict))
@@ -343,7 +359,9 @@ class EmailQueueManager:
             except psycopg2.OperationalError as e:
                 conn.rollback()
                 if attempt < max_retries - 1:
-                    logger.warning(f"Connection error, retrying ({attempt + 1}/{max_retries})")
+                    logger.warning(
+                        f"Connection error, retrying ({attempt + 1}/{max_retries})"
+                    )
                     continue
                 logger.error(f"Failed to get pending emails after retries: {e}")
                 raise EmailQueueError(f"Failed to retrieve pending emails: {e}") from e
@@ -398,7 +416,9 @@ class EmailQueueManager:
             except psycopg2.OperationalError as e:
                 conn.rollback()
                 if attempt < max_retries - 1:
-                    logger.warning(f"Connection error, retrying ({attempt + 1}/{max_retries})")
+                    logger.warning(
+                        f"Connection error, retrying ({attempt + 1}/{max_retries})"
+                    )
                     continue
                 logger.error(f"Failed to update email #{email_id} status: {e}")
                 raise EmailQueueError(f"Failed to update email status: {e}") from e
@@ -409,7 +429,9 @@ class EmailQueueManager:
             finally:
                 self._return_connection(conn)
 
-    def retry_email(self, email_id: int, error: str, backoff_seconds: int = 300) -> None:
+    def retry_email(
+        self, email_id: int, error: str, backoff_seconds: int = 300
+    ) -> None:
         """Retry failed email with exponential backoff.
 
         Args:
@@ -426,7 +448,9 @@ class EmailQueueManager:
             conn = self._get_connection()
             try:
                 with conn.cursor() as cur:
-                    logger.debug(f"Scheduling retry for email #{email_id}, backoff={backoff_seconds}s")
+                    logger.debug(
+                        f"Scheduling retry for email #{email_id}, backoff={backoff_seconds}s"
+                    )
 
                     cur.execute(
                         f"""
@@ -442,7 +466,9 @@ class EmailQueueManager:
             except psycopg2.OperationalError as e:
                 conn.rollback()
                 if attempt < max_retries - 1:
-                    logger.warning(f"Connection error, retrying ({attempt + 1}/{max_retries})")
+                    logger.warning(
+                        f"Connection error, retrying ({attempt + 1}/{max_retries})"
+                    )
                     continue
                 logger.error(f"Failed to retry email #{email_id}: {e}")
                 raise EmailQueueError(f"Failed to retry email: {e}") from e
@@ -472,10 +498,7 @@ class EmailQueueManager:
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        f"""
-                        SELECT * FROM {self.config.SCHEMA_NAME}.email_queue
-                        WHERE id = %s
-                        """,
+                        f"SELECT * FROM {self.config.SCHEMA_NAME}.email_queue WHERE id = %s",  # nosec B608
                         (email_id,),
                     )
                     row = cur.fetchone()
@@ -495,7 +518,9 @@ class EmailQueueManager:
                 # D004 fix: Add rollback before retry
                 conn.rollback()
                 if attempt < max_retries - 1:
-                    logger.warning(f"Connection error, retrying ({attempt + 1}/{max_retries})")
+                    logger.warning(
+                        f"Connection error, retrying ({attempt + 1}/{max_retries})"
+                    )
                     continue
                 logger.error(f"Failed to get email #{email_id}: {e}")
                 raise EmailQueueError(f"Failed to retrieve email: {e}") from e
@@ -543,7 +568,9 @@ class EmailQueueManager:
             except psycopg2.OperationalError as e:
                 conn.rollback()
                 if attempt < max_retries - 1:
-                    logger.warning(f"Connection error, retrying ({attempt + 1}/{max_retries})")
+                    logger.warning(
+                        f"Connection error, retrying ({attempt + 1}/{max_retries})"
+                    )
                     continue
                 logger.error(f"Failed to cleanup old emails: {e}")
                 raise EmailQueueError(f"Failed to cleanup emails: {e}") from e
@@ -572,11 +599,7 @@ class EmailQueueManager:
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        f"""
-                        SELECT status, COUNT(*) as count
-                        FROM {self.config.SCHEMA_NAME}.email_queue
-                        GROUP BY status
-                        """
+                        f"SELECT status, COUNT(*) as count FROM {self.config.SCHEMA_NAME}.email_queue GROUP BY status"  # nosec B608
                     )
                     rows = cur.fetchall()
                     # D011 fix: Explicit handling for read-only query

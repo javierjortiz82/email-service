@@ -150,8 +150,7 @@ def print_banner() -> None:
     print(BANNER)
     print(f"{COLORS['dim']}{'─' * 72}{COLORS['reset']}")
     print(
-        f"{COLORS['cyan']}{COLORS['bold']}  "
-        f"Odiseo Email Microservice{COLORS['reset']}"
+        f"{COLORS['cyan']}{COLORS['bold']}  Odiseo Email Microservice{COLORS['reset']}"
     )
     print(f"{COLORS['dim']}{'─' * 72}{COLORS['reset']}\n")
 
@@ -201,7 +200,9 @@ def print_config_summary(settings: "EmailConfig") -> None:
             masked_url = db_url
     else:
         masked_url = db_url
-    _line("Database URL", masked_url[:45] + "..." if len(masked_url) > 45 else masked_url)
+    _line(
+        "Database URL", masked_url[:45] + "..." if len(masked_url) > 45 else masked_url
+    )
     _line("Schema", settings.SCHEMA_NAME)
 
     # =========================================================================
@@ -210,11 +211,23 @@ def print_config_summary(settings: "EmailConfig") -> None:
     _header("▶", "SMTP Configuration", "magenta")
     _line("Host", settings.SMTP_HOST)
     _line("Port", str(settings.SMTP_PORT))
-    _line("User", settings.SMTP_USER or "(not set)", "yellow" if not settings.SMTP_USER else "cyan")
-    _line("Password", _mask_password(settings.SMTP_PASSWORD), "yellow" if not settings.SMTP_PASSWORD else "cyan")
+    _line(
+        "User",
+        settings.SMTP_USER or "(not set)",
+        "yellow" if not settings.SMTP_USER else "cyan",
+    )
+    _line(
+        "Password",
+        _mask_password(settings.SMTP_PASSWORD),
+        "yellow" if not settings.SMTP_PASSWORD else "cyan",
+    )
     _line("From Email", settings.SMTP_FROM_EMAIL)
     _line("From Name", settings.SMTP_FROM_NAME)
-    _line("TLS Enabled", str(settings.SMTP_USE_TLS).lower(), "green" if settings.SMTP_USE_TLS else "yellow")
+    _line(
+        "TLS Enabled",
+        str(settings.SMTP_USE_TLS).lower(),
+        "green" if settings.SMTP_USE_TLS else "yellow",
+    )
     _line("Timeout", f"{settings.SMTP_TIMEOUT}s")
 
     # =========================================================================
@@ -297,9 +310,7 @@ def setup_logging(
     # Console Handler (stdout for INFO+, stderr for WARNING+)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(getattr(logging, console_level.upper(), logging.INFO))
-    console_formatter = logging.Formatter(
-        _LOG_FORMAT_SIMPLE, datefmt=_DATE_FORMAT
-    )
+    console_formatter = logging.Formatter(_LOG_FORMAT_SIMPLE, datefmt=_DATE_FORMAT)
     console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
 
@@ -315,9 +326,7 @@ def setup_logging(
             encoding="utf-8",
         )
         file_handler.setLevel(getattr(logging, file_level.upper(), logging.DEBUG))
-        file_formatter = logging.Formatter(
-            _LOG_FORMAT_DETAILED, datefmt=_DATE_FORMAT
-        )
+        file_formatter = logging.Formatter(_LOG_FORMAT_DETAILED, datefmt=_DATE_FORMAT)
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
 
@@ -330,9 +339,7 @@ def setup_logging(
             encoding="utf-8",
         )
         error_handler.setLevel(logging.ERROR)
-        error_formatter = logging.Formatter(
-            _LOG_FORMAT_DETAILED, datefmt=_DATE_FORMAT
-        )
+        error_formatter = logging.Formatter(_LOG_FORMAT_DETAILED, datefmt=_DATE_FORMAT)
         error_handler.setFormatter(error_formatter)
         root_logger.addHandler(error_handler)
 

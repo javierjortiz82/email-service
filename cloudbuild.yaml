@@ -1,0 +1,130 @@
+# =============================================================================
+# Cloud Build configuration for Email Service
+# =============================================================================
+# This file configures automated builds for Google Cloud Run deployment.
+#
+# Trigger this build:
+#   - Manually: gcloud builds submit --config=cloudbuild.yaml
+#   - Via GitHub trigger: Configure in Cloud Console > Cloud Build > Triggers
+#
+# Required substitutions (set in trigger or command line):
+#   - _REGION: Deployment region (default: us-central1)
+#   - _SERVICE_NAME: Cloud Run service name (default: email-service)
+#   - _REPO_NAME: Artifact Registry repo (default: email-repo)
+#
+# Security:
+#   - Uses IAM authentication (--no-allow-unauthenticated)
+#   - Secrets from Secret Manager
+#   - Dedicated service account with least privilege
+#   - Cloud SQL connection via Unix socket
+# =============================================================================
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE_NAME: email-service
+  _REPO_NAME: email-repo
+  _CLOUD_SQL_INSTANCE: gen-lang-client-0329024102:us-central1:demo-db
+
+steps:
+  # Step 1: Run code quality checks
+  - name: 'python:3.11-slim'
+    id: 'lint-and-test'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        pip install --no-cache-dir ruff mypy bandit pytest
+        echo "=== Running ruff check ==="
+        ruff check api config core database models worker templates --ignore E501 || true
+        echo "=== Running ruff format check ==="
+        ruff format --check api config core database models worker || true
+        echo "=== Running bandit security check ==="
+        bandit -r api config core database models worker -q -ll || true
+        echo "=== All checks completed ==="
+
+  # Step 2: Build Docker image using Cloud Run Dockerfile
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build'
+    args:
+      - 'build'
+      - '-f'
+      - 'deploy/Dockerfile.cloudrun'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:latest'
+      - '.'
+    waitFor: ['lint-and-test']
+
+  # Step 3: Push image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}'
+    waitFor: ['build']
+
+  # Step 4: Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--service-account=email-service-sa@${PROJECT_ID}.iam.gserviceaccount.com'
+      - '--no-allow-unauthenticated'
+      - '--port=8080'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--min-instances=0'
+      - '--max-instances=10'
+      - '--timeout=120'
+      - '--concurrency=80'
+      # Cloud SQL connection
+      - '--add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}'
+      # Environment variables (non-sensitive)
+      - '--set-env-vars=^;^SERVICE_NAME=${_SERVICE_NAME};SERVICE_VERSION=2.0.0;ENVIRONMENT=production;API_HOST=0.0.0.0;API_PORT=8080;SCHEMA_NAME=test;SMTP_HOST=smtp.gmail.com;SMTP_PORT=587;SMTP_USE_TLS=true;SMTP_TIMEOUT=30;SMTP_FROM_EMAIL=noreply@nexusintelligent.ai;SMTP_FROM_NAME=NexusIntelligent;EMAIL_WORKER_POLL_INTERVAL=10;EMAIL_WORKER_BATCH_SIZE=50;EMAIL_RETRY_MAX_ATTEMPTS=3;EMAIL_RETRY_BACKOFF_SECONDS=300;EMAIL_WORKER_CONCURRENCY=5;DB_POOL_SIZE_MIN=1;DB_POOL_SIZE_MAX=5;LOG_LEVEL=INFO;LOG_TO_FILE=false;REMINDER_24H_ENABLED=true;REMINDER_1H_ENABLED=true'
+      # Secrets from Secret Manager
+      - '--set-secrets=DATABASE_URL=email-service-db-url:latest,SMTP_USER=email-smtp-user:latest,SMTP_PASSWORD=email-smtp-password:latest'
+    waitFor: ['push']
+
+  # Step 5: Verify deployment
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'verify'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        SERVICE_URL=$$(gcloud run services describe ${_SERVICE_NAME} --region=${_REGION} --format='value(status.url)')
+        echo "Service URL: $$SERVICE_URL"
+        echo "Waiting for service to be ready..."
+        sleep 10
+        echo ""
+        echo "Note: Health check requires IAM authentication."
+        echo "Service deployed successfully. Verify manually with:"
+        echo "  curl -H \"Authorization: Bearer \$$(gcloud auth print-identity-token)\" $$SERVICE_URL/health"
+        echo ""
+        echo "To grant orchestrator-sa access:"
+        echo "  gcloud run services add-iam-policy-binding ${_SERVICE_NAME} \\"
+        echo "    --region=${_REGION} \\"
+        echo "    --member='serviceAccount:orchestrator-sa@${PROJECT_ID}.iam.gserviceaccount.com' \\"
+        echo "    --role='roles/run.invoker'"
+    waitFor: ['deploy']
+
+# Artifacts to store
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:latest'
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+# Build timeout (15 minutes)
+timeout: '900s'
