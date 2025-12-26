@@ -226,13 +226,32 @@ log_warning "Save this command for post-deployment"
 # =============================================================================
 log_step "Step 5/7: Secret Manager"
 
-declare -A SECRETS=(
-    ["email-service-db-url"]="PostgreSQL connection URL for email service"
+# Centralized secrets (shared across services)
+CENTRALIZED_SECRETS=("database-url")
+
+# Service-specific secrets (email only)
+declare -A EMAIL_SECRETS=(
     ["email-smtp-user"]="SMTP username (email address)"
     ["email-smtp-password"]="SMTP password (app password)"
 )
 
-for secret_name in "${!SECRETS[@]}"; do
+# Grant access to centralized secrets
+log_info "Granting access to centralized secrets..."
+for secret_name in "${CENTRALIZED_SECRETS[@]}"; do
+    if resource_exists secret "$secret_name"; then
+        gcloud secrets add-iam-policy-binding "$secret_name" \
+            --member="serviceAccount:${SA_EMAIL}" \
+            --role="roles/secretmanager.secretAccessor" \
+            --quiet &>/dev/null
+        log_success "Access granted to '$secret_name' (centralized)"
+    else
+        log_warning "Centralized secret '$secret_name' not found - create it first"
+    fi
+done
+
+# Create email-specific secrets
+log_info "Creating email-specific secrets..."
+for secret_name in "${!EMAIL_SECRETS[@]}"; do
     if resource_exists secret "$secret_name"; then
         log_success "Secret '$secret_name' already exists"
     else
@@ -252,14 +271,16 @@ for secret_name in "${!SECRETS[@]}"; do
 done
 
 log_info ""
-log_info "To update secrets with actual values:"
-echo "  echo 'postgresql://user:pass@/dbname?host=/cloudsql/${CLOUD_SQL_CONNECTION}' | \\"
-echo "    gcloud secrets versions add email-service-db-url --data-file=-"
+log_info "Secrets configuration:"
+echo "  - DATABASE_URL: Uses centralized 'database-url' secret (shared)"
+echo "  - SMTP_USER: Uses 'email-smtp-user' secret (email-specific)"
+echo "  - SMTP_PASSWORD: Uses 'email-smtp-password' secret (email-specific)"
 echo ""
-echo "  echo 'your-smtp-email@gmail.com' | \\"
+log_info "To update SMTP secrets:"
+echo "  printf '%s' 'your-smtp-email@gmail.com' | \\"
 echo "    gcloud secrets versions add email-smtp-user --data-file=-"
 echo ""
-echo "  echo 'your-app-password' | \\"
+echo "  printf '%s' 'your-app-password' | \\"
 echo "    gcloud secrets versions add email-smtp-password --data-file=-"
 
 # =============================================================================

@@ -946,46 +946,147 @@ exit 1
 |  Secret Manager  |<------------|  email-service   |------------->|    Cloud SQL     |
 |                  |   Secrets   |   (Cloud Run)    |  Unix Socket |   (PostgreSQL)   |
 +------------------+              +------------------+              +------------------+
+        |                                  |
+        |                                  v
+        |                         +------------------+
+        +------------------------>|   SMTP Server    |
+          SMTP Credentials        |  (Gmail/etc)     |
+                                  +------------------+
 ```
 
-### Quick Start
+### Prerequisites
+
+Before deploying, ensure you have:
+
+| Requirement | Description |
+|-------------|-------------|
+| **Google Cloud SDK** | `gcloud` CLI installed and authenticated |
+| **GCP Project** | With billing enabled |
+| **Cloud SQL Instance** | PostgreSQL instance running (shared: `demo-db`) |
+| **Docker** | For local builds (optional if using Cloud Build) |
+| **SMTP Credentials** | Gmail App Password or equivalent |
 
 ```bash
-# 1. Initial setup (one-time)
+# Verify gcloud authentication
+gcloud auth list
+
+# Set project
+gcloud config set project gen-lang-client-0329024102
+```
+
+### Deployment Process
+
+#### Step 1: Initial GCP Setup (One-time)
+
+Run the setup script to create all required GCP infrastructure:
+
+```bash
 chmod +x deploy/setup-gcp.sh
 ./deploy/setup-gcp.sh
+```
 
-# 2. Configure secrets
-echo 'postgresql://user:pass@/dbname?host=/cloudsql/INSTANCE' | \
-  gcloud secrets versions add email-service-db-url --data-file=-
+This script creates:
+- **Service Account**: `email-service-sa` with least privilege roles
+- **Artifact Registry**: `email-repo` for Docker images
+- **Secrets**: `email-smtp-user`, `email-smtp-password` (placeholders)
+- **Workload Identity**: For GitHub Actions CI/CD
+- **IAM Bindings**: Required permissions for Cloud Run
 
-echo 'your-email@gmail.com' | \
+#### Step 2: Configure Secrets
+
+The service uses **centralized** and **service-specific** secrets:
+
+| Secret | Type | Description |
+|--------|------|-------------|
+| `database-url` | Centralized | PostgreSQL connection (shared across services) |
+| `email-smtp-user` | Service-specific | SMTP username |
+| `email-smtp-password` | Service-specific | SMTP password (App Password) |
+
+```bash
+# Update SMTP secrets (database-url already exists as centralized secret)
+printf '%s' 'your-email@gmail.com' | \
   gcloud secrets versions add email-smtp-user --data-file=-
 
-echo 'your-app-password' | \
+printf '%s' 'your-16-char-app-password' | \
   gcloud secrets versions add email-smtp-password --data-file=-
 
-# 3. Deploy
-gcloud builds submit --config=cloudbuild.yaml
+# Verify secrets
+gcloud secrets versions list email-smtp-user
+gcloud secrets versions list email-smtp-password
+```
 
-# 4. Grant orchestrator access (after deployment)
+> **Note:** For Gmail, generate an App Password at https://myaccount.google.com/apppasswords
+
+#### Step 3: Deploy to Cloud Run
+
+**Option A: Cloud Build (Recommended)**
+
+```bash
+gcloud builds submit --config=cloudbuild.yaml
+```
+
+**Option B: Manual Deployment**
+
+```bash
+chmod +x deploy/deploy-manual.sh
+./deploy/deploy-manual.sh
+```
+
+#### Step 4: Post-Deployment Setup
+
+Run the post-deployment script to complete setup:
+
+```bash
+chmod +x deploy/post-deploy.sh
+./deploy/post-deploy.sh
+```
+
+This script:
+1. Initializes database schema (`sql/init.sql`)
+2. Grants `roles/run.invoker` to `orchestrator-sa` and `demo-service-sa`
+3. Creates Cloud Scheduler job for queue processing (every minute)
+
+Or manually:
+
+```bash
+# Get service URL
+SERVICE_URL=$(gcloud run services describe email-service \
+  --region=us-central1 --format='value(status.url)')
+
+# Grant orchestrator access
 gcloud run services add-iam-policy-binding email-service \
   --region=us-central1 \
-  --member='serviceAccount:orchestrator-sa@PROJECT_ID.iam.gserviceaccount.com' \
+  --member='serviceAccount:orchestrator-sa@gen-lang-client-0329024102.iam.gserviceaccount.com' \
   --role='roles/run.invoker'
+
+# Grant demo-service access
+gcloud run services add-iam-policy-binding email-service \
+  --region=us-central1 \
+  --member='serviceAccount:demo-service-sa@gen-lang-client-0329024102.iam.gserviceaccount.com' \
+  --role='roles/run.invoker'
+
+# Create Cloud Scheduler job
+gcloud scheduler jobs create http email-queue-processor \
+  --location=us-central1 \
+  --schedule="* * * * *" \
+  --uri="${SERVICE_URL}/queue/process" \
+  --http-method=POST \
+  --oidc-service-account-email=orchestrator-sa@gen-lang-client-0329024102.iam.gserviceaccount.com \
+  --oidc-token-audience="${SERVICE_URL}"
 ```
 
 ### Security Features
 
 | Feature | Implementation |
 |---------|---------------|
-| **Authentication** | IAM (--no-allow-unauthenticated) |
+| **Authentication** | IAM (`--no-allow-unauthenticated`) |
 | **Service Account** | `email-service-sa` with least privilege |
-| **Secrets** | Secret Manager (DATABASE_URL, SMTP credentials) |
-| **Database** | Cloud SQL via Unix socket |
-| **Service-to-Service** | orchestrator-sa has run.invoker role |
+| **Secrets** | Secret Manager (centralized DB, service-specific SMTP) |
+| **Database** | Cloud SQL via Unix socket (no public IP) |
+| **Service-to-Service** | `orchestrator-sa` + `demo-service-sa` have invoker role |
+| **No Service Keys** | Uses Workload Identity Federation |
 
-### Test Production Endpoint
+### Verify Deployment
 
 ```bash
 # Get identity token
@@ -993,13 +1094,20 @@ TOKEN=$(gcloud auth print-identity-token)
 
 # Health check
 curl -H "Authorization: Bearer $TOKEN" \
-  https://email-service-XXXXX.us-central1.run.app/health
+  https://email-service-69054835734.us-central1.run.app/health
 
-# Send email
+# Expected response:
+# {"status":"ok","db":"ok","email_provider":"ok","version":"2.0.0",...}
+
+# Queue status
+curl -H "Authorization: Bearer $TOKEN" \
+  https://email-service-69054835734.us-central1.run.app/queue/status
+
+# Send test email
 curl -X POST \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  https://email-service-XXXXX.us-central1.run.app/emails \
+  https://email-service-69054835734.us-central1.run.app/emails \
   -d '{"to": ["test@example.com"], "subject": "Test", "body": "<h1>Hello</h1>"}'
 ```
 
@@ -1021,6 +1129,48 @@ result = await client.call_email_service(
     template_vars={"otp_code": "123456"}  # optional
 )
 ```
+
+### Monitoring & Troubleshooting
+
+```bash
+# View service logs
+gcloud run services logs read email-service --region=us-central1 --limit=50
+
+# Check service status
+gcloud run services describe email-service --region=us-central1
+
+# Check IAM policy
+gcloud run services get-iam-policy email-service --region=us-central1
+
+# Check scheduler job
+gcloud scheduler jobs describe email-queue-processor --location=us-central1
+
+# Manually trigger queue processing
+gcloud scheduler jobs run email-queue-processor --location=us-central1
+```
+
+### Rollback
+
+```bash
+# List revisions
+gcloud run revisions list --service=email-service --region=us-central1
+
+# Route traffic to previous revision
+gcloud run services update-traffic email-service \
+  --region=us-central1 \
+  --to-revisions=email-service-XXXXX=100
+```
+
+### Deploy Files Reference
+
+| File | Purpose |
+|------|---------|
+| `deploy/setup-gcp.sh` | One-time GCP infrastructure setup |
+| `deploy/post-deploy.sh` | Post-deployment automation (IAM, scheduler) |
+| `deploy/deploy-manual.sh` | Manual deployment script |
+| `deploy/Dockerfile.cloudrun` | Production Docker image |
+| `cloudbuild.yaml` | Cloud Build CI/CD pipeline |
+| `sql/init.sql` | Database schema initialization |
 
 For detailed deployment instructions, see [deploy/DEPLOYMENT_GUIDE.md](deploy/DEPLOYMENT_GUIDE.md).
 

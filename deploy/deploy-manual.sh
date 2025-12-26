@@ -77,7 +77,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --concurrency=80 \
     --add-cloudsql-instances="${CLOUD_SQL_INSTANCE}" \
     --set-env-vars="SERVICE_NAME=${SERVICE_NAME},SERVICE_VERSION=2.0.0,ENVIRONMENT=production,API_HOST=0.0.0.0,API_PORT=8080,SCHEMA_NAME=test,SMTP_HOST=smtp.gmail.com,SMTP_PORT=587,SMTP_USE_TLS=true,SMTP_TIMEOUT=30,SMTP_FROM_EMAIL=noreply@nexusintelligent.ai,SMTP_FROM_NAME=NexusIntelligent,EMAIL_WORKER_POLL_INTERVAL=10,EMAIL_WORKER_BATCH_SIZE=50,EMAIL_RETRY_MAX_ATTEMPTS=3,EMAIL_RETRY_BACKOFF_SECONDS=300,EMAIL_WORKER_CONCURRENCY=5,DB_POOL_SIZE_MIN=1,DB_POOL_SIZE_MAX=5,LOG_LEVEL=INFO,LOG_TO_FILE=false" \
-    --set-secrets="DATABASE_URL=email-service-db-url:latest,SMTP_USER=email-smtp-user:latest,SMTP_PASSWORD=email-smtp-password:latest"
+    --set-secrets="DATABASE_URL=database-url:latest,SMTP_USER=email-smtp-user:latest,SMTP_PASSWORD=email-smtp-password:latest"
 
 log_success "Deployment complete!"
 

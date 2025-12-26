@@ -1,3 +1,4 @@
+---
 # =============================================================================
 # Cloud Build configuration for Email Service
 # =============================================================================
@@ -33,7 +34,8 @@ steps:
     args:
       - '-c'
       - |
-        pip install --no-cache-dir ruff mypy bandit pytest
+        pip install --no-cache-dir uv
+        uv pip install --system ruff mypy bandit pytest
         echo "=== Running ruff check ==="
         ruff check api config core database models worker templates --ignore E501 || true
         echo "=== Running ruff format check ==="
@@ -89,8 +91,8 @@ steps:
       - '--add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}'
       # Environment variables (non-sensitive)
       - '--set-env-vars=^;^SERVICE_NAME=${_SERVICE_NAME};SERVICE_VERSION=2.0.0;ENVIRONMENT=production;API_HOST=0.0.0.0;API_PORT=8080;SCHEMA_NAME=test;SMTP_HOST=smtp.gmail.com;SMTP_PORT=587;SMTP_USE_TLS=true;SMTP_TIMEOUT=30;SMTP_FROM_EMAIL=noreply@nexusintelligent.ai;SMTP_FROM_NAME=NexusIntelligent;EMAIL_WORKER_POLL_INTERVAL=10;EMAIL_WORKER_BATCH_SIZE=50;EMAIL_RETRY_MAX_ATTEMPTS=3;EMAIL_RETRY_BACKOFF_SECONDS=300;EMAIL_WORKER_CONCURRENCY=5;DB_POOL_SIZE_MIN=1;DB_POOL_SIZE_MAX=5;LOG_LEVEL=INFO;LOG_TO_FILE=false;REMINDER_24H_ENABLED=true;REMINDER_1H_ENABLED=true'
-      # Secrets from Secret Manager
-      - '--set-secrets=DATABASE_URL=email-service-db-url:latest,SMTP_USER=email-smtp-user:latest,SMTP_PASSWORD=email-smtp-password:latest'
+      # Secrets from Secret Manager (database-url is centralized, SMTP secrets are service-specific)
+      - '--set-secrets=DATABASE_URL=database-url:latest,SMTP_USER=email-smtp-user:latest,SMTP_PASSWORD=email-smtp-password:latest'
     waitFor: ['push']
 
   # Step 5: Verify deployment

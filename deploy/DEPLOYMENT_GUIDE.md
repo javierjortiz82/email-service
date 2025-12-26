@@ -52,21 +52,29 @@ chmod +x deploy/setup-gcp.sh
 
 ### 2. Configure Secrets
 
-After running setup, update the secrets with actual values:
+The email-service uses **centralized** and **service-specific** secrets:
+
+| Secret | Type | Description |
+|--------|------|-------------|
+| `database-url` | Centralized | Shared PostgreSQL connection string |
+| `email-smtp-user` | Service-specific | SMTP username for email sending |
+| `email-smtp-password` | Service-specific | SMTP password (App Password) |
+
+**Note:** The `database-url` secret is centralized and shared across services. Only update SMTP secrets during setup.
 
 ```bash
-# Database URL (with Cloud SQL Unix socket)
-# Uses same database as other services (demodb with demo_user)
-echo 'postgresql://demo_user:YOUR_DB_PASSWORD@/demodb?host=/cloudsql/gen-lang-client-0329024102:us-central1:demo-db' | \
-  gcloud secrets versions add email-service-db-url --data-file=-
-
-# SMTP Username
-echo 'your-email@gmail.com' | \
+# SMTP Username (service-specific)
+printf '%s' 'your-email@gmail.com' | \
   gcloud secrets versions add email-smtp-user --data-file=-
 
-# SMTP Password (App Password for Gmail)
-echo 'your-16-char-app-password' | \
+# SMTP Password - App Password for Gmail (service-specific)
+printf '%s' 'your-16-char-app-password' | \
   gcloud secrets versions add email-smtp-password --data-file=-
+
+# Note: database-url is centralized and already exists
+# Only update if needed:
+# printf '%s' 'postgresql://demo_user:YOUR_DB_PASSWORD@/demodb?host=/cloudsql/gen-lang-client-0329024102:us-central1:demo-db' | \
+#   gcloud secrets versions add database-url --data-file=-
 ```
 
 ### 3. Deploy
@@ -178,11 +186,11 @@ result = await client.call_email_service(...)
 
 ### Sensitive (from Secret Manager)
 
-| Secret Name | Environment Variable | Description |
-|-------------|---------------------|-------------|
-| `email-service-db-url` | `DATABASE_URL` | PostgreSQL connection string |
-| `email-smtp-user` | `SMTP_USER` | SMTP username |
-| `email-smtp-password` | `SMTP_PASSWORD` | SMTP password |
+| Secret Name | Environment Variable | Type | Description |
+|-------------|---------------------|------|-------------|
+| `database-url` | `DATABASE_URL` | Centralized | PostgreSQL connection string (shared) |
+| `email-smtp-user` | `SMTP_USER` | Service-specific | SMTP username |
+| `email-smtp-password` | `SMTP_PASSWORD` | Service-specific | SMTP password |
 
 ## Updating the Internal Service Client
 
@@ -320,7 +328,7 @@ gcloud run services logs read email-service --region=us-central1 --limit=20
 gcloud run services get-iam-policy email-service --region=us-central1
 
 # List secret versions
-gcloud secrets versions list email-service-db-url
+gcloud secrets versions list database-url
 ```
 
 ## Rollback

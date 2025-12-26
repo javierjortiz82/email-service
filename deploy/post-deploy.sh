@@ -79,8 +79,8 @@ if [ -f "sql/init.sql" ]; then
         PROXY_PID=$!
         sleep 5
 
-        # Get DATABASE_URL from secret
-        DB_URL=$(gcloud secrets versions access latest --secret=email-service-db-url 2>/dev/null || echo "")
+        # Get DATABASE_URL from centralized secret
+        DB_URL=$(gcloud secrets versions access latest --secret=database-url 2>/dev/null || echo "")
 
         if [ -n "$DB_URL" ]; then
             # Extract credentials from URL
